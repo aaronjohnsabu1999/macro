@@ -1,6 +1,6 @@
-# Scalable techniques for autonomous construction of a paraboloidal space telescope in an elliptic orbit
+# Scalable Techniques for Autonomous Construction of a Paraboloidal Space Telescope in an Elliptic Orbit
 
-Code for the paper 'Scalable techniques for autonomous construction of a paraboloidal space telescope in an elliptic orbit' by Aaron John Sabu and Dwaipayan Mukherjee
+Code for the paper 'Scalable Techniques for Autonomous Construction of a Paraboloidal Space Telescope in an Elliptic Orbit' by Aaron John Sabu and Dwaipayan Mukherjee
 
 ***
 ### Abstract
