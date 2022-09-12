@@ -75,7 +75,8 @@ def greedy(R_0, R_T, G):
       if intersecting[ego]:
         for agent in intNeighbors[ego]:
           R_T[ego], R_T[agent] = R_T[agent], R_T[ego]
-          intersecting[ego], intNeighbors[ego] = checkIntersections(ego, R_0, R_T, G[ego])
+          intersecting[ego]  , intNeighbors[ego]   = checkIntersections(ego,   R_0, R_T, G[ego]  )
+          intersecting[agent], intNeighbors[agent] = checkIntersections(agent, R_0, R_T, G[agent])
           if not intersecting[ego]:
             break
   return R_T
