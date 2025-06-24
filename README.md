@@ -3,12 +3,30 @@
 Code for the paper 'Scalable Techniques for Autonomous Construction of a Paraboloidal Space Telescope in an Elliptic Orbit' by Aaron John Sabu and Dwaipayan Mukherjee
 
 ***
-### Abstract
+## Abstract
 
 It is well acknowledged that human-made technology is not always at par with human curiosity, and an example is the inability to send large telescopes to outer space despite their higher resolution and less atmospheric interference. In this paper, we develop a framework for autonomous in-orbit construction using spacecraft formation such that a large telescope can be built in an elliptic orbit using multiple spacecraft. We split this problem into four steps for converging the position and attitude of each spacecraft at predefined values around a central spacecraft. Each spacecraft performs attitude synchronization with its neighbors to match its three degrees of freedom in orientation as a parabolic mirror. Simulations validate our proposed methods and the paper concludes with an open possibility of using other techniques to improve upon existing results.
 
 ***
-### Disclaimers
+## References
+
+If you use this code in your research, please cite the following paper:
+
+```bibtex
+@article{sabu2021scalable,
+  author    = {Aaron John Sabu and Dwaipayan Mukherjee},
+  title     = {Scalable Techniques for Autonomous Construction of a Paraboloidal Space Telescope in an Elliptic Orbit},
+  booktitle = {2021 IEEE Fifth International Conference on Image Processing Applications and Systems (IPAS)},
+  year      = {2021},
+  pages     = {104--109},
+  doi       = {10.1109/IPAS55744.2022.10053039},
+  url       = {https://ieeexplore.ieee.org/document/9703189}
+}
+```
+
+
+***
+## Disclaimers
 
 
 This work was supported in part by an ISRO-funded project bearing code RD/0120-ISROC00-007.  
