@@ -1,0 +1,22 @@
+orbit:
+  radius: 7275            # 6870 + 405
+  gravpar: 398600.50
+  eccentricity: 0.05
+
+simulation:
+  seed: 42
+  num_frames: 800
+  dt: 5.0            # 4000.0 / nframes
+
+formation:
+  num_agents: 36
+  num_jumps: 10
+  neighbor_radius: 0.4
+  clear_aperture: 0.002
+  parabolic_radius: 0.003
+  expansion: 3
+
+auction:
+  enable: true
+  mode: Hybrid
+  final_only: false

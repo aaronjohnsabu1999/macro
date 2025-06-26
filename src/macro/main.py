@@ -1,131 +1,238 @@
-from copy            import deepcopy
-from math            import sqrt
-from ifmea           import ifmea, listPointToTwoDimPoint
-from numpy           import pi, argmin, random, subtract
-from mirror          import genR_T, layerCalc, calcTheta_d
-from simulate        import plotRPY, simulatePL, simulateMPL
-from consensus       import stepUpdate
-from glideslope      import multiAgentGlideslope
-from numpy.linalg    import norm
-from numpy.random    import seed, shuffle
-from initializations import poseInit
-seed(0)
+# /***********************************************************
+# *                                                         *
+# * Copyright (c) 2025                                      *
+# *                                                         *
+# * Indian Institute of Technology, Bombay                  *
+# *                                                         *
+# * Author(s): Aaron John Sabu, Dwaipayan Mukherjee         *
+# * Contact  : aaronjs@g.ucla.edu, dm@ee.iitb.ac.in         *
+# *                                                         *
+# ***********************************************************/
 
-### Orbit Parameters
-R     = 6870 + 405
-mu    = 398600.50
-omega = sqrt(mu/R**3)
-e     =  0.05
-h     = (R**2)*omega
-### Simulation Parameters
-nframes =   800
-dt      =  4000.0/nframes
-### Configuration Parameters
-numAgents     = 36
-numJumps      = 10
-Nghradius     =  0.4
-clearAperture =  0.002
-parabolicRad  =  0.003
-expansion     =  3
-Neighbors     = [[0 for i in range(numAgents)] for i in range(numAgents)]
-a             = [[[0.5*4e-6, 0.5*8e-6, 0.5*8e-6] for i in range(numAgents + 1)] for j in range(numAgents + 1)]
-numLayers, LayerLens = layerCalc(numAgents)
-### Position Parameters
-R_T0  = genR_T(clearAperture, parabolicRad, numAgents, LayerLens, expansion)
-R_T   = deepcopy(R_T0)
-Rdot0 = [[0.00, 0.00, 0.00] for i in range(numAgents)]
-R_0, Theta  = poseInit(numAgents, 5.00)
-R_I, _      = poseInit(numAgents, 0.01)
-individuals = [i for i in range(numAgents)]
-trueMapping = []
-for layer in range(1, numLayers + 1):
-  trueMapping.extend([layer for i in range(LayerLens[layer-1])])
-# shuffle(trueMapping)
+import copy
+import yaml
+import numpy as np
+import matplotlib.pyplot as mplplt
+import plotly.offline as ptyplt
+import plotly.graph_objects as go
+from matplotlib import animation
 
-### Glideslope with Hybrid Auction at jumps from Start Positions to Intermediate Positions
-Xs, Ys, Zs, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(Neighbors, Nghradius,
-                                                                   R_0, Rdot0, R_I, R, e, h, omega,
-                                                                   numJumps, dt, nframes,
-                                                                   auctionParams = (True, 'Hybrid', False),
-                                                                   Config = (trueMapping, individuals))
-NeighborsDistanceOT = NeighborsOutput[0]
-NeighborsConfigOT   = NeighborsOutput[1]
-simulatePL('Stage-01A.html', Xs, Ys, Zs,
-          ['S/c '+str(agent) for agent in range(numAgents)])
-# simulateMPL('Stage-01A.gif', Xs, Ys, Zs,
-           # ['S/c '+str(agent) for agent in range(numAgents)], nframes)
+from macro.ifmea import ifmea, listPointToTwoDimPoint
+from macro.mirror import genR_T, layerCalc, calcTheta_d
+from macro.simulate import plotRPY, simulatePL, simulateMPL
+from macro.glideslope import multiAgentGlideslope
+from macro.utils import init_pose, consensus_step
 
-### Glideslope with Hybrid Auction at jumps from Intermediate Positions to R_T
-Xs, Ys, Zs, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(Neighbors, Nghradius,
-                                                                   R_I, Rdot0, R_T, R, e, h, omega,
-                                                                   numJumps, dt, nframes,
-                                                                   auctionParams = (True, 'Hybrid', False),
-                                                                   Config = (trueMapping, individuals))
-NeighborsDistanceOT = NeighborsOutput[0]
-NeighborsConfigOT   = NeighborsOutput[1]
-simulatePL('Stage-01B.html', Xs, Ys, Zs,
-          ['S/c '+str(agent) for agent in range(numAgents)])
-# simulateMPL('Stage-01B.gif', Xs, Ys, Zs,
-           # ['S/c '+str(agent) for agent in range(numAgents)], nframes)
+mplplt.style.use("fivethirtyeight")
 
-### Determine present configuration of spacecraft
-presentConfig = [[] for layer in range(len(LayerLens))]
-for agent in range(numAgents):
-  r_0 = [Xs[agent][-1], Ys[agent][-1], Zs[agent][-1]]
-  presLayerNum, _ = listPointToTwoDimPoint(LayerLens, argmin([norm(subtract(r_0, r_T)) for r_T in R_T]))
-  trueLayer = trueMapping[agent]
-  presentConfig[presLayerNum].append(trueLayer)
 
-### Intra-Formation Mutual Exchange
-Xs, Ys, Zs, Rolls, Pitches, Yaws = [[[] for agent in range(numAgents)] for i in range(6)]
-AllNeighborsOverTime, FConfig    = [ [] for     i in range(2)]
-IFMEACommands = ifmea(presentConfig)
-R_0 = R_T
-for step, command in enumerate(IFMEACommands):
-  for i in range(command[4]):
-    if command[0] == 'R':
-      rotInd  = individuals[command[1]:command[2]+1]
-      rotInd  = rotInd[-command[3]:] + rotInd[:-command[3]]
-      indTemp = deepcopy(individuals[:command[1]])
-      indTemp.extend(rotInd)
-      indTemp.extend(individuals[command[2]+1:])
-      individuals = indTemp
-    elif command[0] == 'E':
-      R_T = deepcopy(R_0)
-      ind1, ind2, ind3 = individuals[command[1]], individuals[command[2]], individuals[command[3]]
-      R_T[ind1], R_T[ind2], R_T[ind3] = R_T[ind2], R_T[ind3], R_T[ind1]
-      individuals[command[1]], individuals[command[2]], individuals[command[3]] = ind3, ind1, ind2
-    FConfig.append(individuals)
-    for agent in individuals:
-      R_T[agent] = R_T0[individuals.index(agent)]
-    X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(Neighbors, Nghradius,
-                                                                    R_0, Rdot0, R_T, R, e, h, omega,
-                                                                    numJumps, dt, nframes,
-                                                                    auctionParams = (False, '', True),
-                                                                    Config = (presentConfig, individuals))
-    NeighborsDistanceOT = NeighborsOutput[0]
-    NeighborsConfigOT   = NeighborsOutput[1]
-    AllNeighborsOverTime.append(NeighborsConfigOT)
-    R_0 = R_T
-    for agent in range(numAgents):
-      Xs[agent].extend(X[agent])
-      Ys[agent].extend(Y[agent])
-      Zs[agent].extend(Z[agent])
-simulatePL('Stage-02.html', Xs, Ys, Zs,
-          ['S/c '+str(agent) for agent in range(numAgents)])
+class MacroSimulation:
+  def __init__(self, config_path="config/default.yaml"):
+    with open(config_path, "r") as f:
+      self.config = yaml.safe_load(f)
+    self._init_params()
 
-### Attitude Consensus
-for command in range(len(AllNeighborsOverTime)):
-  time    = 0
-  fConfig = FConfig[command]
-  NeighborsConfigOT = AllNeighborsOverTime[command]
-  Theta_d = calcTheta_d(clearAperture, parabolicRad, LayerLens, FConfig[command])
-  for i in range(nframes):
-    Neighbors = NeighborsConfigOT[0][1]
-    tempTheta = []
-    for agent in range(numAgents):
-      tempTheta.append(stepUpdate(agent, Theta, Theta_d, Neighbors[agent], a[agent], dt, i))
-    tempTheta.append([0.0, 0.0, 0.0])
-    for agent in range(numAgents):
-      Theta[agent].append(tempTheta[agent])
-plotRPY(Theta)
+  def _init_params(self):
+    sim = self.config["simulation"]
+    form = self.config["formation"]
+    orbit = self.config["orbit"]
+
+    np.random.seed(sim.get("seed", 0))
+
+    self.num_agents = form["num_agents"]
+    self.num_jumps = form["num_jumps"]
+    self.nframes = sim["num_frames"]
+    self.dt = sim["dt"]
+
+    self.radius = orbit["radius"]
+    self.mu = orbit["gravpar"]
+    self.e = orbit["eccentricity"]
+    self.omega = np.sqrt(self.mu / self.radius**3)
+    self.h = self.radius**2 * self.omega
+
+    self.clear_aperture = form["clear_aperture"]
+    self.parab_radius = form["parabolic_radius"]
+    self.expansion = form["expansion"]
+
+    self.neighbors = [[0] * self.num_agents for _ in range(self.num_agents)]
+    self.agent_params = [
+        [[0.5 * 4e-6, 0.5 * 8e-6, 0.5 * 8e-6]
+         for _ in range(self.num_agents + 1)]
+        for _ in range(self.num_agents + 1)
+    ]
+    self.num_layers, self.layer_lens = layerCalc(self.num_agents)
+
+    self.R_T0 = genR_T(
+        self.clear_aperture,
+        self.parab_radius,
+        self.num_agents,
+        self.layer_lens,
+        self.expansion,
+    )
+    self.R_T = self.R_T0.copy()
+    self.V_0 = np.zeros((self.num_agents, 3))
+    self.R_0, self.Theta = init_pose(self.num_agents, 5.00)
+    self.R_I, _ = init_pose(self.num_agents, 0.01)
+
+    self.individuals = list(range(self.num_agents))
+    self.true_mapping = [
+        layer
+        for layer in range(1, self.num_layers + 1)
+        for _ in range(self.layer_lens[layer - 1])
+    ]
+
+  def _simulate_phase(self, start, end, stage_name, auction):
+    X, Y, Z, *_, output = multiAgentGlideslope(
+        self.neighbors,
+        self.config["formation"]["neighbor_radius"],
+        start,
+        self.V_0,
+        end,
+        self.radius,
+        self.e,
+        self.h,
+        self.omega,
+        self.num_jumps,
+        self.dt,
+        self.nframes,
+        auctionParams=auction,
+        Config=(self.true_mapping, self.individuals),
+    )
+    self._simulatePL(f"{stage_name}.html", X, Y, Z)
+    return X, Y, Z, output
+
+  def _simulatePL(self, title, X, Y, Z):
+    fig = go.Figure(
+        data=[
+            go.Scatter3d(
+                mode="markers",
+                x=X[i],
+                y=Y[i],
+                z=Z[i],
+                marker=dict(size=3),
+                name=f"S/c {i}",
+            )
+            for i in range(len(X))
+        ]
+    )
+    ptyplt.plot(fig, filename=title)
+
+  def _plotRPY(self):
+    for dim in range(3):
+      for agent in range(self.num_agents):
+        mplplt.plot(
+            [self.Theta[agent][i][dim] for i in range(len(self.Theta[agent]))]
+        )
+      mplplt.show()
+
+  def _intra_formation_exchange(self, present_config):
+    Xs, Ys, Zs = [[[] for _ in range(self.num_agents)] for _ in range(3)]
+    AllNeighbors, FConfig = [], []
+    R_0 = self.R_T
+    IFMEA = ifmea(present_config)
+
+    for command in IFMEA:
+      for _ in range(command[4]):
+        if command[0] == "R":
+          r = self.individuals[command[1]: command[2] + 1]
+          r = r[-command[3]:] + r[: -command[3]]
+          self.individuals = (
+              self.individuals[: command[1]]
+              + r
+              + self.individuals[command[2] + 1:]
+          )
+        elif command[0] == "E":
+          R_0 = self.R_T.copy()
+          i1, i2, i3 = [self.individuals[i] for i in command[1:4]]
+          self.R_T[i1], self.R_T[i2], self.R_T[i3] = (
+              self.R_T[i2],
+              self.R_T[i3],
+              self.R_T[i1],
+          )
+          (
+              self.individuals[command[1]],
+              self.individuals[command[2]],
+              self.individuals[command[3]],
+          ) = (i3, i1, i2)
+
+        FConfig.append(self.individuals.copy())
+        for agent in self.individuals:
+          self.R_T[agent] = self.R_T0[self.individuals.index(agent)]
+
+        X, Y, Z, *_, out = multiAgentGlideslope(
+            self.neighbors,
+            self.config["formation"]["neighbor_radius"],
+            R_0,
+            self.V_0,
+            self.R_T,
+            self.radius,
+            self.e,
+            self.h,
+            self.omega,
+            self.num_jumps,
+            self.dt,
+            self.nframes,
+            auctionParams=(False, "", True),
+            Config=(present_config, self.individuals),
+        )
+        AllNeighbors.append(out[1])
+        R_0 = self.R_T
+        for i in range(self.num_agents):
+          Xs[i].extend(X[i])
+          Ys[i].extend(Y[i])
+          Zs[i].extend(Z[i])
+
+    self._simulatePL("Stage-02.html", Xs, Ys, Zs)
+    return AllNeighbors, FConfig
+
+  def _attitude_consensus(self, AllNeighbors, FConfig):
+    for k in range(len(AllNeighbors)):
+      Theta_d = calcTheta_d(
+          self.clear_aperture, self.parab_radius, self.layer_lens, FConfig[k]
+      )
+      for i in range(self.nframes):
+        Neighbors = AllNeighbors[k][0][1]
+        tempTheta = [
+            consensus_step(
+                agent,
+                self.Theta,
+                Theta_d,
+                Neighbors[agent],
+                self.agent_params[agent],
+                self.dt,
+                i,
+            )
+            for agent in range(self.num_agents)
+        ] + [[0.0, 0.0, 0.0]]
+        for agent in range(self.num_agents):
+          self.Theta[agent].append(tempTheta[agent])
+    self._plotRPY()
+
+  def run(self):
+    # Phase 1: Initial to Intermediate
+    _, _, _, _ = self._simulate_phase(
+        self.R_0, self.R_I, "Stage-01A", (True, "Hybrid", False)
+    )
+
+    # Phase 2: Intermediate to Target
+    X, Y, Z, _ = self._simulate_phase(
+        self.R_I, self.R_T, "Stage-01B", (True, "Hybrid", False)
+    )
+
+    # Configuration Analysis
+    present = [[] for _ in range(len(self.layer_lens))]
+    for agent in range(self.num_agents):
+      r_0 = np.array([X[agent][-1], Y[agent][-1], Z[agent][-1]])
+      r_t = np.array(self.R_T)
+      idx, _ = listPointToTwoDimPoint(
+          self.layer_lens, np.argmin([np.linalg.norm(r_0 - r) for r in r_t])
+      )
+      present[idx].append(self.true_mapping[agent])
+
+    # Mutual Exchanges and Consensus
+    AllNeighbors, FConfig = self._intra_formation_exchange(present)
+    self._attitude_consensus(AllNeighbors, FConfig)
+
+
+if __name__ == "__main__":
+  MacroSimulation().run()
