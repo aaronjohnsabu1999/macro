@@ -52,6 +52,50 @@ def init_pose(num_agents, radius, *, seed=None):
     return R_0, Theta
 
 
+def gen_cost(ego_location, target_locations, min_value=True, func="euclidean"):
+    """
+    Generate cost based on Euclidean distance between an agent and all target positions.
+
+    Args:
+        ego_location (np.ndarray): Current position of the agent.
+        target_locations (np.ndarray): Positions of all targets.
+        min_value (bool or int): If True or non-zero, apply negative scaling.
+
+    Returns:
+        list[float]: List of cost values.
+    """
+    ego_location = np.array(ego_location)
+    target_locations = np.array(target_locations)
+    scale = -(1 ** (int(min_value) - 1))
+    if func == "euclidean":
+        return [scale * np.linalg.norm(ego_location - t) for t in target_locations]
+    elif func == "manhattan":
+        return [scale * np.sum(np.abs(ego_location - t)) for t in target_locations]
+    else:
+        raise ValueError(f"Unknown cost function: {func}")
+
+
+def is_connected(G):
+    """
+    Check if the graph defined by adjacency matrix G is fully connected.
+
+    Args:
+        G (list[list[int]]): Adjacency matrix.
+
+    Returns:
+        bool: True if graph is connected, else False.
+    """
+    num_agents = len(G)
+    visited, to_visit = set(), {0}
+    while to_visit:
+        current = to_visit.pop()
+        visited.add(current)
+        to_visit.update(
+            i for i, val in enumerate(G[current]) if val and i not in visited
+        )
+    return len(visited) == num_agents
+
+
 def time_to_true_anomaly(
     ang_vel: float | np.ndarray,
     eccentricity: float | np.ndarray,
