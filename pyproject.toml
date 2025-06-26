@@ -1,0 +1,36 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "macro"
+version = "1.0.0"
+description = "Megastructure Assembly via Collaborative Robots in Orbits (MACRO)"
+authors = [{ name = "Aaron John Sabu", email = "aaronjs@g.ucla.edu" }
+           , { name = "Dwaipayan Mukherjee", email = "dm@ee.iitb.ac.in" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "black",
+    "numpy",
+    "scipy",
+    "plotly",
+    "pyyaml",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ipython",
+    "mypy",
+    "ruff"
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["macro*"]
