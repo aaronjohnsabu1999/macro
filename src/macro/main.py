@@ -20,7 +20,7 @@ from matplotlib import animation
 from macro.ifmea import ifmea, listPointToTwoDimPoint
 from macro.mirror import genR_T, layerCalc, calcTheta_d
 from macro.simulate import plotRPY, simulatePL, simulateMPL
-from macro.glideslope import multiAgentGlideslope
+from macro.glideslope import Agent, GlideslopeSimulator
 from macro.utils import init_pose, consensus_step, NullLogger
 
 mplplt.style.use("fivethirtyeight")
@@ -82,7 +82,12 @@ class Macro:
         ]
 
     def _simulate_phase(self, start, end, stage_name, auction):
-        X, Y, Z, *_, output = multiAgentGlideslope(
+        agents = [
+            Agent(id=i, position=start[i], velocity=self.V_0[i], target=end[i])
+            for i in range(self.num_agents)
+        ]
+        sim = GlideslopeSimulator(
+            agents,
             self.neighbors,
             self.config["formation"]["neighbor_radius"],
             start,
@@ -95,11 +100,17 @@ class Macro:
             self.num_jumps,
             self.dt,
             self.nframes,
-            auctionParams=auction,
-            Config=(self.true_mapping, self.individuals),
+            auction_type=auction[0],
+            config_enabled=auction[1],
+            config=self.true_mapping,
+            fConfig=self.individuals,
         )
+        traj, *_ = sim.run()
+        X = [traj[i][:, 0] for i in range(self.num_agents)]
+        Y = [traj[i][:, 1] for i in range(self.num_agents)]
+        Z = [traj[i][:, 2] for i in range(self.num_agents)]
         self._simulatePL(f"{stage_name}.html", X, Y, Z)
-        return X, Y, Z, output
+        return X, Y, Z, sim.NeighborsDistanceOT, sim.NeighborsConfigOT
 
     def _simulatePL(self, title, X, Y, Z):
         fig = go.Figure(
@@ -159,21 +170,8 @@ class Macro:
                 for agent in self.individuals:
                     self.R_T[agent] = self.R_T0[self.individuals.index(agent)]
 
-                X, Y, Z, *_, out = multiAgentGlideslope(
-                    self.neighbors,
-                    self.config["formation"]["neighbor_radius"],
-                    R_0,
-                    self.V_0,
-                    self.R_T,
-                    self.radius,
-                    self.e,
-                    self.h,
-                    self.omega,
-                    self.num_jumps,
-                    self.dt,
-                    self.nframes,
-                    auctionParams=(False, "", True),
-                    Config=(present_config, self.individuals),
+                X, Y, Z, _, out = self._simulate_phase(
+                    R_0, self.R_T, "Stage-02", (None, True)
                 )
                 AllNeighbors.append(out[1])
                 R_0 = self.R_T
@@ -209,17 +207,13 @@ class Macro:
         self._plotRPY()
 
     def run(self):
-        # Phase 1: Initial to Intermediate
         _, _, _, _ = self._simulate_phase(
-            self.R_0, self.R_I, "Stage-01A", (True, "Hybrid", False)
+            self.R_0, self.R_I, "Stage-01A", ("Hybrid", False)
+        )
+        X, Y, Z, _, _ = self._simulate_phase(
+            self.R_I, self.R_T, "Stage-01B", ("Hybrid", False)
         )
 
-        # Phase 2: Intermediate to Target
-        X, Y, Z, _ = self._simulate_phase(
-            self.R_I, self.R_T, "Stage-01B", (True, "Hybrid", False)
-        )
-
-        # Configuration Analysis
         present = [[] for _ in range(len(self.layer_lens))]
         for agent in range(self.num_agents):
             r_0 = np.array([X[agent][-1], Y[agent][-1], Z[agent][-1]])
@@ -229,7 +223,6 @@ class Macro:
             )
             present[idx].append(self.true_mapping[agent])
 
-        # Mutual Exchanges and Consensus
         AllNeighbors, FConfig = self._intra_formation_exchange(present)
         self._attitude_consensus(AllNeighbors, FConfig)
 

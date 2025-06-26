@@ -12,6 +12,27 @@
 import numpy as np
 
 
+def load_config(config_path="config/default.yaml"):
+    """
+    Load a configuration file and return its contents.
+
+    Parameters:
+    ----------
+    config_path : str
+      Path to the configuration file
+
+    Returns:
+    -------
+    dict
+      Contents of the configuration file as a dictionary
+    """
+    import yaml
+
+    with open(config_path, "r") as file:
+        config = yaml.safe_load(file)
+    return config
+
+
 def random_sign():
     """Return either +1 or -1 randomly."""
     return 1 if np.random.randint(0, 2) == 0 else -1

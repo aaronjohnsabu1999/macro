@@ -10,172 +10,147 @@
 # ***********************************************************/
 
 import numpy as np
-
-from macro.auction import greedy, cnsAuction, disAuction, hybAuction, stdAuction
+from dataclasses import dataclass
+from macro.auction import auction_map
 from macro.utils import time_to_true_anomaly
 from macro.maneuvers import getTransformMatrixTH, getManeuverPointsTH
 from macro.neighbors import neighborsConfig, neighborsDistance
 
 
-def reduction_factor(index: int, total_steps: int) -> float:
-    """
-    Compute a linear reduction factor based on step index.
+@dataclass
+class Agent:
+    id: int
+    position: np.ndarray
+    velocity: np.ndarray
+    target: np.ndarray
+    glideslope_dir: np.ndarray = None
 
-    Parameters:
-        index (int): Current step or iteration index (0-based).
-        total_steps (int): Total number of steps or iterations.
+    def update_direction(self):
+        delta = self.position - self.target
+        norm = np.linalg.norm(delta)
+        self.glideslope_dir = delta / norm if norm > 1e-4 else np.zeros_like(delta)
 
-    Returns:
-        float: Reduction factor in [0, 1), decreasing with index.
-    """
-    return 1.0 - (index + 1) / total_steps
+    def step(self, index, total_steps, phi_r, phi_v):
+        if np.linalg.norm(self.glideslope_dir) < 1e-4:
+            return np.zeros(3), []
 
-
-def scaled_distance_reduction(
-    index: int,
-    total_steps: int,
-    target_position: np.ndarray,
-    current_position: np.ndarray,
-    initial_position: np.ndarray = None,
-) -> float:
-    """
-    Compute the reduction-scaled distance from current to target position.
-
-    Parameters:
-        index (int): Current iteration index.
-        total_steps (int): Total number of iterations.
-        target_position (np.ndarray): Target 3D position vector.
-        current_position (np.ndarray): Current 3D position vector.
-        initial_position (np.ndarray, optional): Not used here but accepted for API compatibility.
-
-    Returns:
-        float: Scaled Euclidean distance from current to target.
-    """
-    scale = reduction_factor(index, total_steps)
-    distance = np.linalg.norm(current_position - target_position)
-    return scale * distance
+        scale = 1.0 - (index + 1) / total_steps
+        r_k1 = (
+            self.target
+            + scale * np.linalg.norm(self.position - self.target) * self.glideslope_dir
+        )
+        deltav = np.linalg.inv(phi_v) @ (r_k1 - phi_r @ self.position) - self.velocity
+        self.velocity += deltav
+        return deltav, []  # Maneuver points added externally
 
 
-# Glideslope Algorithm
-def multiAgentGlideslope(
-    InitNeighbors,
-    Nghradius,
-    R_0,
-    Rdot0,
-    R_T,
-    R,
-    e,
-    h,
-    omega,
-    numJumps,
-    dt,
-    nframes,
-    auctionParams=(True, "Distributed", False),
-    Config=([], []),
-):
-    # Position Initializations
-    numAgents = len(R_0)
-    R_k = R_0.copy()
-    Rdot = Rdot0.copy()
-    a_i = [0.00055 for agent in range(numAgents + 1)]
-    xs, ys, zs = [[[] for agent in range(numAgents)] for dim in range(3)]
-    u_GLS = [(R_0[agent] - R_T[agent]) for agent in range(numAgents)]
-    rho_T = [np.linalg.norm(u) for u in u_GLS]
-    for agent in range(numAgents):
-        if np.linalg.norm(u_GLS[agent]) > 0.0001:
-            u_GLS[agent] /= rho_T[agent]
-    # Timing Definitions
-    T = dt * (nframes - 1)
-    deltaT = T / numJumps
-    # Energy Initializations
-    deltavs = []
-    energy = 0.0
-    # Neighbors Initializations
-    auction = auctionParams[0]
-    aucType = auctionParams[1]
-    conf = auctionParams[2]
-    NeighborsDistanceOT = []
-    # Finding Neighbors over Configuration
-    if conf:
-        NeighborsConfigOT = []
-        config = Config[0]
-        fConfig = Config[1]
-    for firing in range(numJumps):
-        # Orbit Parameter Update
-        t = deltaT * firing
-        tnext = t + deltaT
-        f, fnext = time_to_true_anomaly(omega, e, [t, tnext])
-        phi_r = getTransformMatrixTH(R, e, h, [tnext, t], [fnext, f])[0:3]
-        phi_r_r = [arr[0:3] for arr in phi_r]
-        phi_r_rdot = [arr[3:6] for arr in phi_r]
-        # Distance-based Auction for Determination of Pre-Assembly Position
-        if auction:
-            NeighborsDistance = neighborsDistance(InitNeighbors, Nghradius, R_0)
-            if aucType == "Standard":
-                R_T = stdAuction(R_k, R_T, NeighborsDistance)
-            elif aucType == "Hybrid":
-                R_T = hybAuction(R_k, R_T, NeighborsDistance)
-            elif aucType == "Distributed":
-                R_T = disAuction(R_k, R_T, NeighborsDistance)
-            elif aucType == "Consensus":
-                R_T = cnsAuction(R_k, R_T, NeighborsDistance)
-            elif aucType == "Greedy":
-                R_T = greedy(R_k, R_T, NeighborsDistance)
-        # Configuration-based Auction for Determination of Communication Links
-        if conf:
-            NeighborsConfig = neighborsConfig(config, fConfig)
-        # Individual Agent Update
-        for agent in range(numAgents):
-            # Check if neighbor is not ego
-            if np.linalg.norm(u_GLS[agent]) > 0.0001:
-                # Positional Parameter Initialization
-                r_T = R_T[agent]
-                r_k = R_k[agent]
-                r_0 = R_0[agent]
-                rdot = Rdot[agent]
-                rho_k = np.linalg.norm(r_k - r_T)
-                r_k1 = (
-                    r_T
-                    + scaled_distance_reduction(firing, numJumps, r_T, r_k, r_0)
-                    * u_GLS[agent]
+class GlideslopeSimulator:
+    def __init__(
+        self,
+        agents,
+        neighbors_0,
+        neighbor_radius,
+        R_T,
+        R,
+        e,
+        h,
+        omega,
+        num_jumps,
+        dt,
+        nframes,
+        auction_type="Distributed",
+        config_enabled=False,
+        config=(),
+        fConfig=(),
+    ):
+        self.agents = agents
+        self.neighbors_0 = neighbors_0
+        self.neighbor_radius = neighbor_radius
+        self.R_T = R_T
+        self.R = R
+        self.e = e
+        self.h = h
+        self.omega = omega
+        self.num_jumps = num_jumps
+        self.dt = dt
+        self.nframes = nframes
+        self.auction_type = auction_type
+        self.config_enabled = config_enabled
+        self.config = config
+        self.fConfig = fConfig
+
+        self.steps_per_jump = int(nframes / num_jumps)
+        self.trajectory = {agent.id: np.zeros((nframes, 3)) for agent in agents}
+        self.energy = 0.0
+        self.deltavs = []
+        self.NeighborsDistanceOT = []
+        self.NeighborsConfigOT = []
+
+    def run(self):
+        for agent in self.agents:
+            agent.update_direction()
+
+        for jump in range(self.num_jumps):
+            t = self.dt * self.steps_per_jump * jump
+            tnext = t + self.dt * self.steps_per_jump
+            f, fnext = time_to_true_anomaly(self.omega, self.e, [t, tnext])
+            phi = getTransformMatrixTH(self.R, self.e, self.h, [tnext, t], [fnext, f])[
+                :3
+            ]
+            phi_r = np.array([row[:3] for row in phi])
+            phi_v = np.array([row[3:6] for row in phi])
+
+            if self.auction_type:
+                NeighborsDistance = neighborsDistance(
+                    self.neighbors_0,
+                    self.neighbor_radius,
+                    np.array([a.position for a in self.agents]),
                 )
-                # Delta-V Calculation
-                deltav = (
-                    np.dot(np.linalg.inv(phi_r_rdot), (r_k1 - np.dot(phi_r_r, r_k)))
-                    - rdot
-                )
-                deltavs.append(np.linalg.norm(deltav))
-                energy += deltavs[-1]
-                rdot = rdot + deltav
-                # Timed Update of Positional Parameters
-                for i in range(int(nframes / numJumps)):
-                    time = dt * i
-                    rt, rdott = getManeuverPointsTH(r_k, rdot, [t + time, t], R, e, h)
-                    xs[agent].append(rt[0])
-                    ys[agent].append(rt[1])
-                    zs[agent].append(rt[2])
-                # Positional Parameter Accumulation
-                R_k[agent] = rt
-                Rdot[agent] = rdott
-            # If neighbor is ego, do nothing
-            else:
-                r_0 = R_0[agent]
-                xs[agent].append(r_0[0])
-                ys[agent].append(r_0[1])
-                zs[agent].append(r_0[2])
-        # Update Over-Time Collection of Neighbors
-        if aucType != "":
-            NeighborsDistanceOT.append((deltaT * firing, NeighborsDistance))
-        if conf:
-            NeighborsConfigOT.append((deltaT * firing, NeighborsConfig))
-    # Return Output
-    NeighborsOutput = []
-    if aucType != "":
-        NeighborsOutput.append(NeighborsDistanceOT)
-    else:
-        NeighborsOutput.append([])
-    if conf:
-        NeighborsOutput.append(NeighborsConfigOT)
-    else:
-        NeighborsOutput.append([])
-    return xs, ys, zs, deltavs, energy, NeighborsOutput
+                if self.auction_type not in auction_map:
+                    raise ValueError(f"Unknown auction type: {self.auction_type}")
+                self.R_T = auction_map[self.auction_type](
+                    np.array([a.position for a in self.agents]),
+                    self.R_T,
+                    NeighborsDistance,
+                ).assign()
+                for i, agent in enumerate(self.agents):
+                    agent.target = self.R_T[i]
+                    agent.update_direction()
+
+            if self.config_enabled:
+                NeighborsConfig = neighborsConfig(self.config, self.fConfig)
+
+            for i, agent in enumerate(self.agents):
+                deltav, _ = agent.step(jump, self.num_jumps, phi_r, phi_v)
+                self.energy += np.linalg.norm(deltav)
+                self.deltavs.append(np.linalg.norm(deltav))
+
+                for step in range(self.steps_per_jump):
+                    time = self.dt * step
+                    rt, vt = getManeuverPointsTH(
+                        agent.position,
+                        agent.velocity,
+                        [t + time, t],
+                        self.R,
+                        self.e,
+                        self.h,
+                    )
+                    idx = jump * self.steps_per_jump + step
+                    self.trajectory[agent.id][idx] = rt
+                agent.position = rt
+                agent.velocity = vt
+
+            if self.auction_type:
+                self.NeighborsDistanceOT.append((t, NeighborsDistance))
+            if self.config_enabled:
+                self.NeighborsConfigOT.append((t, NeighborsConfig))
+
+        return (
+            self.trajectory,
+            np.array(self.deltavs),
+            self.energy,
+            [
+                self.NeighborsDistanceOT if self.auction_type else [],
+                self.NeighborsConfigOT if self.config_enabled else [],
+            ],
+        )

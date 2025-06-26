@@ -157,7 +157,7 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     num_jumps,
     dt,
     nframes,
-    auctionParams=(True, "Standard", False),
+    auctionParams=("Standard", False),
     Config=(config, fConfig),
 )
 NeighborsDistanceOT = NeighborsOutput[0]
@@ -185,7 +185,7 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     num_jumps,
     dt,
     nframes,
-    auctionParams=(True, "Distributed", False),
+    auctionParams=("Distributed", False),
     Config=(config, fConfig),
 )
 NeighborsDistanceOT = NeighborsOutput[0]
@@ -203,7 +203,7 @@ simulatePL(
 # X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(Neighbors, Nghradius,
 # R_0, Rdot0, R_T, R, e, h, omega,
 # num_jumps, dt, nframes,
-# auctionParams = (True, 'Consensus', False),
+# auctionParams = ('Consensus', False),
 # Config        = (config, fConfig))
 # NeighborsDistanceOT = NeighborsOutput[0]
 # NeighborsConfigOT   = NeighborsOutput[1]
@@ -224,7 +224,7 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     num_jumps,
     dt,
     nframes,
-    auctionParams=(True, "Greedy", False),
+    auctionParams=("Greedy", False),
     Config=(config, fConfig),
 )
 NeighborsDistanceOT = NeighborsOutput[0]
