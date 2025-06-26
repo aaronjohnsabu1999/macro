@@ -9,14 +9,24 @@
 # *                                                         *
 # ***********************************************************/
 
+import logging
 import argparse
-from src.macro.main import main
+from macro import Macro
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument(
-      "--config", type=str, default="config/default.yaml", help="Path to YAML config"
-  )
-  args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", type=str, default="config/default.yaml", help="Path to YAML config"
+    )
+    args = parser.parse_args()
 
-  main(args.config)
+    logger = logging.getLogger("macro")
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s [%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    sim = Macro(config_path=args.config, logger=logger)
+    sim.run()

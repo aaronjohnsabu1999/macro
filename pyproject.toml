@@ -7,10 +7,10 @@ build-backend = "setuptools.build_meta"
 name = "macro"
 version = "1.0.0"
 description = "Megastructure Assembly via Collaborative Robots in Orbits (MACRO)"
-authors = [{ name = "Aaron John Sabu", email = "aaronjohnsabu1999@gmail.com" }
+authors = [{ name = "Aaron John Sabu", email = "aaronjs@g.ucla.edu" }
            , { name = "Dwaipayan Mukherjee", email = "dm@ee.iitb.ac.in" }]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "black",
     "numpy",

@@ -21,8 +21,7 @@ num_jumps = 5
 
 innerRad = 0.4
 R_T = [
-    [innerRad * 1 * np.sin(np.deg2rad(0)), innerRad *
-     1 * np.cos(np.deg2rad(0)), 0.000],
+    [innerRad * 1 * np.sin(np.deg2rad(0)), innerRad * 1 * np.cos(np.deg2rad(0)), 0.000],
     [
         innerRad * 1 * np.sin(np.deg2rad(60)),
         innerRad * 1 * np.cos(np.deg2rad(60)),
@@ -48,8 +47,7 @@ R_T = [
         innerRad * 1 * np.cos(np.deg2rad(300)),
         0.000,
     ],
-    [innerRad * 2 * np.sin(np.deg2rad(0)), innerRad *
-     2 * np.cos(np.deg2rad(0)), 0.000],
+    [innerRad * 2 * np.sin(np.deg2rad(0)), innerRad * 2 * np.cos(np.deg2rad(0)), 0.000],
     [
         innerRad * 2 * np.sin(np.deg2rad(30)),
         innerRad * 2 * np.cos(np.deg2rad(30)),
