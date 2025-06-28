@@ -20,7 +20,7 @@ num_agents = 18
 num_jumps = 5
 
 innerRad = 0.4
-R_T = [
+R_f = [
     [innerRad * 1 * np.sin(np.deg2rad(0)), innerRad * 1 * np.cos(np.deg2rad(0)), 0.000],
     [
         innerRad * 1 * np.sin(np.deg2rad(60)),
@@ -104,14 +104,14 @@ R_T = [
         0.000,
     ],
 ]
-Rdot0 = [[0.00, 0.00, 0.00] for i in range(num_agents)]
-R = 6870 + 405
-mu = 398600.50
-omega = np.sqrt(mu / R**3)
-nframes = 400
-dt = 4000.0 / nframes
-e = 0.05
-h = (R**2) * omega
+V_0 = [[0.00, 0.00, 0.00] for i in range(num_agents)]
+orbital_radius = 6870 + 405
+gravpar = 398600.50
+ang_vel = np.sqrt(gravpar / orbital_radius**3)
+num_frames = 400
+dt = 4000.0 / num_frames
+eccentricity = 0.05
+ang_mom = (orbital_radius**2) * ang_vel
 config = [[1, 2, 1, 1, 1, 2], [2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2]]
 fConfig = [i for i in range(num_agents)]
 
@@ -148,15 +148,15 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     Neighbors,
     Nghradius,
     R_0,
-    Rdot0,
-    R_T,
-    R,
-    e,
-    h,
-    omega,
+    V_0,
+    R_f,
+    orbital_radius,
+    eccentricity,
+    ang_mom,
+    ang_vel,
     num_jumps,
     dt,
-    nframes,
+    num_frames,
     auctionParams=("Standard", False),
     Config=(config, fConfig),
 )
@@ -176,15 +176,15 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     Neighbors,
     Nghradius,
     R_0,
-    Rdot0,
-    R_T,
-    R,
-    e,
-    h,
-    omega,
+    V_0,
+    R_f,
+    orbital_radius,
+    eccentricity,
+    ang_mom,
+    ang_vel,
     num_jumps,
     dt,
-    nframes,
+    num_frames,
     auctionParams=("Distributed", False),
     Config=(config, fConfig),
 )
@@ -201,8 +201,8 @@ simulatePL(
 # R_0 = RRR.copy()
 # Neighbors = [[0 for i in range(num_agents)] for i in range(num_agents)]
 # X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(Neighbors, Nghradius,
-# R_0, Rdot0, R_T, R, e, h, omega,
-# num_jumps, dt, nframes,
+# R_0, V_0, R_f, orbital_radius, eccentricity, ang_mom, ang_vel,
+# num_jumps, dt, num_frames,
 # auctionParams = ('Consensus', False),
 # Config        = (config, fConfig))
 # NeighborsDistanceOT = NeighborsOutput[0]
@@ -215,15 +215,15 @@ X, Y, Z, Deltav, Energy, NeighborsOutput = multiAgentGlideslope(
     Neighbors,
     Nghradius,
     R_0,
-    Rdot0,
-    R_T,
-    R,
-    e,
-    h,
-    omega,
+    V_0,
+    R_f,
+    orbital_radius,
+    eccentricity,
+    ang_mom,
+    ang_vel,
     num_jumps,
     dt,
-    nframes,
+    num_frames,
     auctionParams=("Greedy", False),
     Config=(config, fConfig),
 )

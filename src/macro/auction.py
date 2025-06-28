@@ -32,14 +32,14 @@ class Auction(ABC):
 
     Attributes:
         R_0 (np.ndarray): Initial positions of agents.
-        R_T (np.ndarray): Target positions to assign.
+        R_f (np.ndarray): Target positions to assign.
         G (np.ndarray): Adjacency matrix indicating communication graph.
         num_agents (int): Number of agents.
     """
 
-    def __init__(self, R_0, R_T, G, *args, **kwargs):
+    def __init__(self, R_0, R_f, G, *args, **kwargs):
         self.R_0 = R_0
-        self.R_T = R_T
+        self.R_f = R_f
         self.G = G
         self.num_agents = len(R_0)
         self.logger = kwargs.get("logger", NullLogger())
@@ -72,13 +72,13 @@ class StandardAuction(Auction):
         self.logger.debug("Starting standard auction assignment")
         for ego in range(self.num_agents):
             neighbors = [i for i in range(self.num_agents) if self.G[ego][i] > 0]
-            R_Tn = [self.R_T[i] for i in neighbors]
+            R_fn = [self.R_f[i] for i in neighbors]
             R_0n = [self.R_0[i] for i in neighbors]
-            cost_matrix = [gen_cost(r0, R_Tn) for r0 in R_0n]
+            cost_matrix = [gen_cost(r_0, R_fn) for r_0 in R_0n]
             _, col_ind = linear_sum_assignment(cost_matrix)
             for idx, agent in enumerate(neighbors):
-                self.R_T[agent] = R_Tn[col_ind[idx]]
-        return self.R_T
+                self.R_f[agent] = R_fn[col_ind[idx]]
+        return self.R_f
 
 
 class GreedyAuction(Auction):
@@ -97,19 +97,21 @@ class GreedyAuction(Auction):
             tuple[bool, list[int]]: Whether intersection exists, and list of colliding agents.
         """
         self.logger.debug("Checking intersections for agent %d", ego)
-        r0, rT = self.R_0[ego], self.R_T[ego]
+        r_0, r_f = self.R_0[ego], self.R_f[ego]
         intersecting = []
-        for i, (r0n, rTn) in enumerate(zip(self.R_0, self.R_T)):
+        for i, (r_0n, r_fn) in enumerate(zip(self.R_0, self.R_f)):
             if self.G[ego][i] and i != ego:
                 A = [
-                    [r0[0] - rT[0], -(r0n[0] - rTn[0])],
-                    [r0[1] - rT[1], -(r0n[1] - rTn[1])],
+                    [r_0[0] - r_f[0], -(r_0n[0] - r_fn[0])],
+                    [r_0[1] - r_f[1], -(r_0n[1] - r_fn[1])],
                 ]
-                B = [rT[0] - rTn[0], rT[1] - rTn[1]]
+                B = [r_f[0] - r_fn[0], r_f[1] - r_fn[1]]
                 try:
                     t, s = np.linalg.solve(A, B)
                     dz = abs(
-                        (r0[2] - rT[2]) * t - (r0n[2] - rTn[2]) * s - (rT[2] - rTn[2])
+                        (r_0[2] - r_f[2]) * t
+                        - (r_0n[2] - r_fn[2]) * s
+                        - (r_f[2] - r_fn[2])
                     )
                     if dz < 1e-3:
                         intersecting.append(i)
@@ -131,13 +133,13 @@ class GreedyAuction(Auction):
                 intersects, neighbors = self._check_intersections(ego)
                 if intersects:
                     for other in neighbors:
-                        self.R_T[ego], self.R_T[other] = self.R_T[other], self.R_T[ego]
+                        self.R_f[ego], self.R_f[other] = self.R_f[other], self.R_f[ego]
                         if not self._check_intersections(ego)[0]:
                             changes = True
                             break
             if not changes:
                 break
-        return self.R_T
+        return self.R_f
 
 
 class DistributedAuction(Auction):
@@ -154,9 +156,9 @@ class DistributedAuction(Auction):
         """
         self.logger.debug("Starting distributed auction assignment")
         if not is_connected(self.G):
-            return self.R_T
+            return self.R_f
 
-        beta = [gen_cost(r0, self.R_T, False) for r0 in self.R_0]
+        beta = [gen_cost(r_0, self.R_f, False) for r_0 in self.R_0]
         a = np.zeros(self.num_agents, dtype=int)
         p = np.zeros((self.num_agents, self.num_agents))
         b = np.zeros_like(p)
@@ -189,7 +191,7 @@ class DistributedAuction(Auction):
             if np.array_equal(a, a_next):
                 break
             a = a_next
-        return [self.R_T[i] for i in a]
+        return [self.R_f[i] for i in a]
 
 
 # 'Consensus-Based Decentralized Auctions for Robust Task Allocation' - Choi, Brunet, How
@@ -207,9 +209,9 @@ class ConsensusAuction(Auction):
         """
         self.logger.debug("Starting consensus auction assignment")
         if not is_connected(self.G):
-            return self.R_T
+            return self.R_f
 
-        c = [gen_cost(r0, self.R_T) for r0 in self.R_0]
+        c = [gen_cost(r_0, self.R_f) for r_0 in self.R_0]
         x, y, z = (
             np.zeros((self.num_agents, self.num_agents)),
             np.zeros_like(x),
@@ -247,7 +249,7 @@ class ConsensusAuction(Auction):
                 select_task(ego)
             for ego in range(self.num_agents):
                 update_task(ego)
-        return self.R_T
+        return self.R_f
 
 
 class HybridAuction(Auction):
@@ -267,15 +269,15 @@ class HybridAuction(Auction):
         self.logger.debug("Starting hybrid auction assignment")
         if not is_connected(self.G):
             self.logger.debug("Graph is not connected, using greedy auction")
-            return GreedyAuction(self.R_0, self.R_T, self.G).assign()
+            return GreedyAuction(self.R_0, self.R_f, self.G).assign()
         else:
             self.logger.debug("Graph is connected, using distributed auction")
-            return DistributedAuction(self.R_0, self.R_T, self.G).assign()
+            return DistributedAuction(self.R_0, self.R_f, self.G).assign()
 
 
 if __name__ == "__main__":
     R_0 = np.array([[0, 0, 0], [1, 1, 0], [2, 2, 0]])  # Initial positions
-    R_T = np.array([[3, 3, 0], [4, 4, 0], [5, 5, 0]])  # Target positions
+    R_f = np.array([[3, 3, 0], [4, 4, 0], [5, 5, 0]])  # Target positions
     G = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])  # Connectivity graph
 
     logger = logging.getLogger("Auction")
@@ -286,6 +288,6 @@ if __name__ == "__main__":
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 
-    auction = HybridAuction(R_0, R_T, G=G, logger=logger)
+    auction = HybridAuction(R_0, R_f, G=G, logger=logger)
     new_targets = auction.assign()
     print("New Assignments:", new_targets)

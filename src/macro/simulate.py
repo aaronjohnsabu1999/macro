@@ -20,7 +20,7 @@ mplplt.style.use("fivethirtyeight")
 
 
 # Simulations
-def simulateMPL(title, X, Y, Z, labels, nframes):  # Simulate using Matplotlib
+def simulateMPL(title, X, Y, Z, labels, num_frames):  # Simulate using Matplotlib
     def init():
         return ax
 
@@ -54,7 +54,7 @@ def simulateMPL(title, X, Y, Z, labels, nframes):  # Simulate using Matplotlib
     ax.set_zlabel("Z")
     ax.azim = 140
     ax.elev = -45
-    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=nframes)
+    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=num_frames)
     anim.save(title, fps=20, writer="Pillow", progress_callback=lambda i, n: print(i))
 
 

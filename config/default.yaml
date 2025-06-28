@@ -6,7 +6,7 @@ orbit:
 simulation:
   seed: 42
   num_frames: 800
-  dt: 5.0            # 4000.0 / nframes
+  dt: 5.0            # 4000.0 / num_frames
 
 formation:
   num_agents: 36

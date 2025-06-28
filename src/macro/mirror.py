@@ -26,30 +26,30 @@ def layerCalc(numAgents):
 
 
 # Calculate specific positions for all agents
-def genR_T(CA, R, numAgents, LayerLens, expansion):
-    R_T, XY, Z = [[] for i in range(3)]
+def genR_f(CA, orbital_radius, numAgents, LayerLens, expansion):
+    R_f, XY, Z = [[] for i in range(3)]
     numLayers = len(LayerLens)
-    _, Ps = parabolicParams(CA, R, numLayers)
+    _, Ps = parabolicParams(CA, orbital_radius, numLayers)
     for layer in range(numLayers):
         XY.append(Ps[layer][0])
         Z.append(Ps[layer][1])
     for agent in range(numAgents):
         layerNum, pointNum = listPointToTwoDimPoint(LayerLens, agent)
         circAngle = pointNum * 2.0 * np.pi / LayerLens[layerNum]
-        R_T.append(
+        R_f.append(
             [
                 expansion * XY[layerNum] * np.sin(circAngle),
                 expansion * XY[layerNum] * np.cos(circAngle),
                 expansion * Z[layerNum],
             ]
         )
-    return R_T
+    return R_f
 
 
 # Calculate specific attitudes for all agents
-def calcTheta_d(CA, R, LayerLens, fConfig):
+def calcTheta_d(CA, orbital_radius, LayerLens, fConfig):
     Theta_d = [[0.0, 0.0, 0.0] for j in range(len(fConfig) + 1)]
-    Pitches, _ = parabolicParams(CA, R, len(LayerLens))
+    Pitches, _ = parabolicParams(CA, orbital_radius, len(LayerLens))
     for listPoint, agent in enumerate(fConfig):
         presLayerNum, presPointNum = listPointToTwoDimPoint(LayerLens, listPoint)
         trueLayerNum, truePointNum = listPointToTwoDimPoint(LayerLens, agent)
@@ -61,24 +61,28 @@ def calcTheta_d(CA, R, LayerLens, fConfig):
 
 
 # Generate generic positions and attitudes based on layer number
-def parabolicParams(CA, R, l):
+def parabolicParams(CA, orbital_radius, l):
     def equations(theta_i, Thetas):
         lhs = CA * (0.5 + np.sum([np.sin(theta) for theta in Thetas]) + np.sin(theta_i))
         rhs = CA * (
-            CA / (8.0 * R)
+            CA / (8.0 * orbital_radius)
             + np.sum([np.cos(theta) for theta in Thetas])
             + np.cos(theta_i)
         )
-        return (lhs**2) / (2.0 * R) - rhs
+        return (lhs**2) / (2.0 * orbital_radius) - rhs
 
     Thetas = []
-    Ps = [(CA / 2.0, CA**2 / (8.0 * R))]
+    Ps = [(CA / 2.0, CA**2 / (8.0 * orbital_radius))]
     for i in range(l):
         theta_i = fsolve(equations, 0, Thetas)
         Thetas.append(theta_i[0])
         p_i = (
             CA * (0.5 + np.sum([np.sin(theta) for theta in Thetas])),
-            CA * (CA / (8.0 * R) + np.sum([np.cos(theta) for theta in Thetas])),
+            CA
+            * (
+                CA / (8.0 * orbital_radius)
+                + np.sum([np.cos(theta) for theta in Thetas])
+            ),
         )
         Ps.append(p_i)
     return Thetas, Ps
