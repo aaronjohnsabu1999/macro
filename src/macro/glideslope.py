@@ -150,11 +150,10 @@ class GlideslopeSimulator:
                 self.deltavs.append(np.linalg.norm(deltav))
 
                 for step in range(self.steps_per_jump):
-                    time = self.dt * step
                     r_t, v_t = compute_maneuver_points(
                         r_0=agent.position,
                         v_0=agent.velocity,
-                        times=[t + time, t],
+                        times=[t0 + self.dt * step, t0],
                         eccentricity=self.eccentricity,
                         orbital_radius=self.orbital_radius,
                         angular_velocity=self.angular_velocity,
@@ -165,9 +164,9 @@ class GlideslopeSimulator:
                 agent.velocity = v_t
 
             if self.auction_type:
-                self.NeighborsDistanceOT.append((t, NeighborsDistance))
+                self.NeighborsDistanceOT.append((t0, NeighborsDistance))
             if self.config_enabled:
-                self.NeighborsConfigOT.append((t, NeighborsConfig))
+                self.NeighborsConfigOT.append((t0, NeighborsConfig))
 
         return (
             self.trajectory,
