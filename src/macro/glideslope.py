@@ -105,6 +105,22 @@ class GlideslopeSimulator:
             (self.num_jumps, len(agents), len(agents)), dtype=float
         )
 
+    def set_simulation_params(self, sim: SimulationParams):
+        self.dt = sim.timestep
+        self.num_jumps = sim.num_phases
+        self.num_frames = sim.total_frames
+        self.auction_type = sim.auction_type
+        self.config_enabled = sim.use_config
+        self.config = sim.config_data
+        self.fConfig = sim.config_order
+
+        self.steps_per_jump = int(self.num_frames / self.num_jumps)
+        self.trajectory = np.zeros((len(self.agents), self.num_frames, 3))
+        self.energy = 0.0
+        self.deltavs = []
+        self.NeighborsDistanceOT = []
+        self.NeighborsConfigOT = []
+
     def run(self):
         for agent in self.agents:
             agent.update_direction()
