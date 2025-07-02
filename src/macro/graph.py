@@ -131,44 +131,37 @@ class SystemGraph:
         self._update_flat_config()
         self._build_graph()
 
-    def exchange_positions(self, agent_id1, agent_id2, agent_id3=None):
+    def exchange_positions(self, pos1, pos2, pos3=None):
         """
-        Exchange positions of two or three agents in the graph.
+        Exchange positions of two or three agents in the graph using (layer_idx, pos_idx).
 
         Parameters
         ----------
-        agent_id1 : int
-            ID of the first agent.
-        agent_id2 : int
-            ID of the second agent.
-        agent_id3 : int, optional
-            ID of the third agent. If provided, the positions of all three agents will be rotated.
+        pos1 : tuple[int, int]
+            (layer_idx, pos_idx) of the first agent.
+        pos2 : tuple[int, int]
+            (layer_idx, pos_idx) of the second agent.
+        pos3 : tuple[int, int], optional
+            (layer_idx, pos_idx) of the third agent. If provided, positions of all three agents will be rotated.
         """
-        agent_p1 = self.flat_config.index(agent_id1)
-        agent_p2 = self.flat_config.index(agent_id2)
-        agent_p3 = (
-            self.flat_config.index(agent_id3)
-            if agent_id3 is not None and agent_id3 not in [agent_id1, agent_id2]
-            else None
-        )
+        l1, p1 = pos1
+        l2, p2 = pos2
 
-        if agent_id1 == agent_id2:
-            return
+        if pos3 is not None:
+            l3, p3 = pos3
+            a1 = self.layer_config[l1][p1]
+            a2 = self.layer_config[l2][p2]
+            a3 = self.layer_config[l3][p3]
 
-        # Swap positions
-        self.layer_config[agent_p1 // self.layer_lengths[0]][
-            agent_p1 % self.layer_lengths[0]
-        ] = agent_id2
-        self.layer_config[agent_p2 // self.layer_lengths[0]][
-            agent_p2 % self.layer_lengths[0]
-        ] = agent_id1
-        if agent_p3 is not None:
-            self.layer_config[agent_p3 // self.layer_lengths[0]][
-                agent_p3 % self.layer_lengths[0]
-            ] = agent_id2
-            self.layer_config[agent_p2 // self.layer_lengths[0]][
-                agent_p2 % self.layer_lengths[0]
-            ] = agent_id3
+            self.layer_config[l1][p1] = a3
+            self.layer_config[l2][p2] = a1
+            self.layer_config[l3][p3] = a2
+        else:
+            a1 = self.layer_config[l1][p1]
+            a2 = self.layer_config[l2][p2]
+
+            self.layer_config[l1][p1] = a2
+            self.layer_config[l2][p2] = a1
 
         self._update_flat_config()
         self._build_graph()

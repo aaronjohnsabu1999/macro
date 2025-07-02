@@ -9,10 +9,10 @@
 # *                                                         *
 # ***********************************************************/
 
-from math import floor
-from macro.graph import SystemGraph
+import numpy as np
 
-from macro.utils import to_layer_index, to_flat_index
+from macro.graph import SystemGraph
+from macro.utils import to_flat_index
 
 
 def find_nearest_mismatch(config, next_config, layer_idx, pos_idx):
@@ -27,7 +27,7 @@ def find_nearest_mismatch(config, next_config, layer_idx, pos_idx):
         elif next_config[lower] != layer_idx + 2:
             mismatch_idx = lower
             break
-    closest = floor(mismatch_idx / 2)
+    closest = int(np.floor(mismatch_idx / 2))
     if closest < pos_idx:
         closest += mismatch_idx % 2
     return mismatch_idx, closest
@@ -54,9 +54,6 @@ def ifmea_commands(layer_config, *args, **kwargs):
         - ("E", idx1, idx2, idx3, 1) for three-agent exchanges
     """
     commands = []
-    # layer_type is either in kwargs or it is 0 for the root and increases by 1 for each layer aka the index of the layer
-    # the idea of ifmea is to work from the outermost layer inward, so we start with the outermost layer
-    # we try to match agent_type to layer_type by performing rotations and exchanges
     if not layer_config:
         raise ValueError("Layer configuration cannot be empty.")
     if not isinstance(layer_config, list) or not all(
@@ -75,23 +72,23 @@ def ifmea_commands(layer_config, *args, **kwargs):
     graph = kwargs.get("graph", SystemGraph(layer_config, flat_config))
     layer_lengths = graph.get_layer_lengths()
 
+    print("Initial Layer Configuration:", layer_config)
+
     # Work from outermost layer inward
     outer_layer_idx = len(layer_config) - 1
     while outer_layer_idx > 0:
-        print(f"Processing layer {outer_layer_idx}...")
         inner_layer_idx = 0
 
         while inner_layer_idx != outer_layer_idx:
-            print(f"Checking layer {inner_layer_idx}...")
             try:
                 # Find position of agent needing to move up
                 pos_idx = graph.get_layer_config()[inner_layer_idx].index(
                     outer_layer_idx + 1
                 )
-                print(f"Found position {pos_idx} in layer {inner_layer_idx}.")
             except ValueError:
+                if inner_layer_idx == 0:
+                    break
                 inner_layer_idx -= 1
-                print(f"No agent to move up in layer {inner_layer_idx + 1}.")
                 continue
 
             # Find closest mismatch position in the layer above
@@ -100,9 +97,6 @@ def ifmea_commands(layer_config, *args, **kwargs):
                 graph.get_layer_config()[inner_layer_idx + 1],
                 inner_layer_idx,
                 pos_idx,
-            )
-            print(
-                f"Found mismatch at index {mismatch_idx} in layer {inner_layer_idx + 1}."
             )
 
             # Rotate to align source and target
@@ -118,7 +112,6 @@ def ifmea_commands(layer_config, *args, **kwargs):
                         abs(shift),
                     )
                 )
-                print(f"Rotated layer {inner_layer_idx} by {shift} positions.")
 
             # Perform exchange (depending on whether mismatch is left or right)
             if mismatch_idx < 2 * target_pos_idx:
@@ -127,9 +120,9 @@ def ifmea_commands(layer_config, *args, **kwargs):
                 third_idx = (target_pos_idx + 1) % layer_lengths[inner_layer_idx]
 
             graph.exchange_positions(
-                to_flat_index(layer_lengths, inner_layer_idx, target_pos_idx),
-                to_flat_index(layer_lengths, inner_layer_idx + 1, mismatch_idx),
-                to_flat_index(layer_lengths, inner_layer_idx, third_idx),
+                (inner_layer_idx, target_pos_idx),
+                (inner_layer_idx + 1, mismatch_idx),
+                (inner_layer_idx, third_idx),
             )
             commands.append(
                 (
@@ -140,11 +133,6 @@ def ifmea_commands(layer_config, *args, **kwargs):
                     1,
                 )
             )
-            print(
-                f"Exchanged positions {target_pos_idx}, {mismatch_idx}, and {third_idx} in layers {inner_layer_idx} and {inner_layer_idx + 1}."
-            )
-            print("Layer config before step:", graph.get_layer_config())
-            input()
 
             # Allow upward re-checking
             if inner_layer_idx < outer_layer_idx - 1:
@@ -152,13 +140,33 @@ def ifmea_commands(layer_config, *args, **kwargs):
 
         outer_layer_idx -= 1
 
+    print("Final Layer Configuration:", graph.get_layer_config())
     return commands
 
 
 if __name__ == "__main__":
-    init_layer_config = [
-        [1, 1, 3, 1, 2, 2],
-        [2, 2, 1, 2, 2, 2, 2, 3, 2, 2, 2, 1],
-        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
-    ]
+    # Define how many of each type we need
+    counts = {
+        1: 6,
+        2: 12,
+        3: 18,
+        4: 24,
+        5: 30,
+    }
+
+    # Create the full list of agents
+    all_agents = [agent_type for agent_type, count in counts.items() for _ in range(count)]
+    np.random.shuffle(all_agents)
+
+    # Define layer sizes
+    layer_sizes = [counts[i] for i in range(1, 6)]
+
+    # Split shuffled agents into layers
+    init_layer_config = []
+    idx = 0
+    for size in layer_sizes:
+        init_layer_config.append(all_agents[idx:idx + size])
+        idx += size
+
     print(ifmea_commands(init_layer_config))
+
