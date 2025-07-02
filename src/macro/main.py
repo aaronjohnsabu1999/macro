@@ -28,6 +28,7 @@ class Macro:
             self.config = yaml.safe_load(f)
         self.logger = kwargs.get("logger", NullLogger())
         self._init_params()
+        self.ifmea_engine = IFMEAEngine()
 
     def _init_params(self):
         np.random.seed(self.config["simulation"].get("seed", 0))
@@ -168,8 +169,8 @@ class Macro:
                 traj[agent, dim] = []
         all_neighbors, all_flat_config = [], []
         R_0 = self.R_f
-        IFMEA = IFMEAEngine(current_config)
-        commands = IFMEA.run()
+        self.ifmea_engine.set_layer_config(self.layer_config)
+        commands = self.ifmea_engine.run()
 
         for command in commands:
             for _ in range(command[4]):
