@@ -12,6 +12,27 @@
 import numpy as np
 
 
+def load_config(config_path="config/default.yaml"):
+    """
+    Load a configuration file and return its contents.
+
+    Parameters:
+    ----------
+    config_path : str
+      Path to the configuration file
+
+    Returns:
+    -------
+    dict
+      Contents of the configuration file as a dictionary
+    """
+    import yaml
+
+    with open(config_path, "r") as file:
+        config = yaml.safe_load(file)
+    return config
+
+
 def random_sign():
     """Return either +1 or -1 randomly."""
     return 1 if np.random.randint(0, 2) == 0 else -1
@@ -50,6 +71,29 @@ def init_pose(num_agents, radius, *, seed=None):
     Theta.append(np.zeros(3))
 
     return R_0, Theta
+
+
+def gen_cost(ego_location, target_locations, min_value=True, func="euclidean"):
+    """
+    Generate cost based on Euclidean distance between an agent and all target positions.
+
+    Args:
+        ego_location (np.ndarray): Current position of the agent.
+        target_locations (np.ndarray): Positions of all targets.
+        min_value (bool or int): If True or non-zero, apply negative scaling.
+
+    Returns:
+        list[float]: List of cost values.
+    """
+    ego_location = np.array(ego_location)
+    target_locations = np.array(target_locations)
+    scale = -(1 ** (int(min_value) - 1))
+    if func == "euclidean":
+        return [scale * np.linalg.norm(ego_location - t) for t in target_locations]
+    elif func == "manhattan":
+        return [scale * np.sum(np.abs(ego_location - t)) for t in target_locations]
+    else:
+        raise ValueError(f"Unknown cost function: {func}")
 
 
 def time_to_true_anomaly(
@@ -117,48 +161,83 @@ def time_to_true_anomaly(
 
 
 def consensus_step(
-    agent_index: int,
-    attitude_history: np.ndarray,
-    desired_attitude: np.ndarray,
-    neighbor_indices: np.ndarray,
-    control_gains: np.ndarray,
-    step_size: float,
-    iteration_count: int,
+    agent_id: int,
+    history: np.ndarray,
+    desired: np.ndarray,
+    neighbors: np.ndarray,
+    gains: np.ndarray,
+    timestep: float,
+    count: int,
 ):
     """
-    Perform one attitude update step for a given agent using consensus-based control.
+    Perform one value update step for a given agent using consensus-based control.
 
     Parameters:
-      agent_index (int): Index of the ego agent performing the update.
-      attitude_history (np.ndarray): Time history of attitude vectors for each agent.
-      desired_attitude (np.ndarray): Desired attitude vectors for each agent.
-      neighbor_indices (np.ndarray): Indices of neighbors of the ego agent.
-      control_gains (np.ndarray): Per-agent control gain vectors (one per agent).
-      step_size (float): Base step size (scalar multiplier for update magnitude).
-      iteration_count (int): Current iteration (used to scale the update).
+      agent_id (int): Index of the ego agent performing the update.
+      history (np.ndarray): Time history of value vectors for each agent.
+      desired (np.ndarray): Desired value vectors for each agent.
+      neighbors (np.ndarray): Indices of neighbors of the ego agent.
+      gains (np.ndarray): Per-agent control gain vectors (one per agent).
+      timestep (float): Base timestep (scalar multiplier for update magnitude).
+      count (int): Current iteration (used to scale the update).
 
     Returns:
-      np.ndarray: Updated attitude vector for the ego agent.
+      np.ndarray: Updated value vector for the ego agent.
     """
-    previous_attitude = attitude_history[agent_index][-1]
-    updated_attitude = previous_attitude.copy()
+    previous = history[agent_id, -1]
+    updated = previous.copy()
+    ego_error = previous - desired[agent_id]
 
-    for neighbor_index, gain_vector in enumerate(control_gains):
-        if neighbor_index in neighbor_indices:
-            ego_error = (
-                attitude_history[agent_index][-1] - desired_attitude[agent_index]
-            )
-            neighbor_error = (
-                attitude_history[neighbor_index][-1] - desired_attitude[neighbor_index]
-            )
-            error_difference = ego_error - neighbor_error
+    for neighbor_id in neighbors:
+        neighbor_error = history[neighbor_id, -1] - desired[neighbor_id]
+        delta = timestep * count * gains[neighbor_id] * (ego_error - neighbor_error)
+        updated -= delta
 
-            scaled_adjustment = (
-                step_size * iteration_count * gain_vector * error_difference
-            )
-            updated_attitude = updated_attitude - scaled_adjustment
+    return updated
 
-    return updated_attitude
+
+def to_flat_index(layer_lengths, layer_idx, pos_idx):
+    """
+    Convert a 2D index (layer, position) to a flat list index.
+
+    Parameters
+    ----------
+    layer_lengths : list[int]
+        Lengths of each layer.
+    layer_idx : int
+        Index of the layer.
+    pos_idx : int
+        Index within the layer.
+
+    Returns
+    -------
+    int
+        Flat index in a 1D configuration list.
+    """
+    offset = sum(layer_lengths[:layer_idx])
+    return offset + (pos_idx % layer_lengths[layer_idx])
+
+
+def to_layer_index(layer_lengths, flat_idx):
+    """
+    Convert a flat list index to a 2D index (layer, position).
+
+    Parameters
+    ----------
+    layer_lengths : list[int]
+        Lengths of each layer.
+    flat_idx : int
+        Flat index in a 1D configuration list.
+
+    Returns
+    -------
+    tuple[int, int]
+        Tuple of (layer index, position within layer).
+    """
+    for layer_idx, layer_len in enumerate(layer_lengths):
+        if flat_idx < layer_len:
+            return layer_idx, flat_idx
+        flat_idx -= layer_len
 
 
 class NullLogger:

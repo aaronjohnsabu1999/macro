@@ -12,73 +12,167 @@
 import numpy as np
 from scipy.optimize import fsolve
 
-from macro.ifmea import listPointToTwoDimPoint
+from macro.utils import to_layer_index
 
 
-# Calculate lengths of layers for given number of agents
-def layerCalc(numAgents):
+def calc_number_of_layers(num_agents):
+    """
+    Determine the number of concentric layers and their agent counts
+    such that the total equals or exceeds the given number of agents.
+
+    Parameters
+    ----------
+    num_agents : int
+        Total number of agents to distribute in hexagonal layers.
+
+    Returns
+    -------
+    tuple[int, list[int]]
+        Number of layers and list of agent counts per layer.
+    """
+    layer_lengths = []
     layer = 1
-    layerLens = []
-    while np.sum(layerLens) < numAgents:
-        layerLens.append(layer * 6)
+    total = 0
+
+    while total < num_agents:
+        count = layer * 6
+        layer_lengths.append(count)
+        total += count
         layer += 1
-    return len(layerLens), layerLens
+
+    return len(layer_lengths), layer_lengths
 
 
-# Calculate specific positions for all agents
-def genR_T(CA, R, numAgents, LayerLens, expansion):
-    R_T, XY, Z = [[] for i in range(3)]
-    numLayers = len(LayerLens)
-    _, Ps = parabolicParams(CA, R, numLayers)
-    for layer in range(numLayers):
-        XY.append(Ps[layer][0])
-        Z.append(Ps[layer][1])
-    for agent in range(numAgents):
-        layerNum, pointNum = listPointToTwoDimPoint(LayerLens, agent)
-        circAngle = pointNum * 2.0 * np.pi / LayerLens[layerNum]
-        R_T.append(
-            [
-                expansion * XY[layerNum] * np.sin(circAngle),
-                expansion * XY[layerNum] * np.cos(circAngle),
-                expansion * Z[layerNum],
-            ]
+def generate_target_positions(
+    clear_aperture, orbital_radius, num_agents, layer_lengths, expansion
+):
+    """
+    Generate 3D target positions for agents arranged in concentric circular layers.
+
+    Parameters
+    ----------
+    clear_aperture : float
+        Aperture diameter of the telescope system.
+    orbital_radius : float
+        Reference orbital radius.
+    num_agents : int
+        Total number of agents to be positioned.
+    layer_lengths : list[int]
+        Number of agents in each layer.
+    expansion : float
+        Radial and axial scaling factor.
+
+    Returns
+    -------
+    list[list[float]]
+        A list of 3D positions (x, y, z) for each agent.
+    """
+
+    R_f = []
+    num_layers = len(layer_lengths)
+    _, layer_params = generate_paraboloid_layer_geometry(
+        clear_aperture, orbital_radius, num_layers
+    )
+
+    XY_radii = [r[0] for r in layer_params]
+    Z_offsets = [r[1] for r in layer_params]
+
+    for agent_id in range(num_agents):
+        layer_idx, pos_idx = to_layer_index(layer_lengths, agent_id)
+        angle = 2 * np.pi * pos_idx / layer_lengths[layer_idx]
+
+        x = expansion * XY_radii[layer_idx] * np.sin(angle)
+        y = expansion * XY_radii[layer_idx] * np.cos(angle)
+        z = expansion * Z_offsets[layer_idx]
+
+        R_f.append([x, y, z])
+
+    return R_f
+
+
+def compute_desired_attitudes(
+    clear_aperture, orbital_radius, layer_lengths, flat_config
+):
+    """
+    Calculate the desired attitude (roll, pitch, yaw) for each agent based on their target position.
+
+    Parameters
+    ----------
+    clear_aperture : float
+        Aperture diameter of the telescope system.
+    orbital_radius : float
+        Reference orbital radius.
+    layer_lengths : list[int]
+        Number of agents in each concentric layer.
+    flat_config : list[int]
+        Flattened ordering of agent IDs (i.e., final config as flat list).
+
+    Returns
+    -------
+    list[list[float]]
+        A list of attitude vectors [roll, pitch, yaw] for each agent.
+    """
+    num_agents = len(flat_config)
+    desired_attitudes = [[0.0, 0.0, 0.0] for _ in range(num_agents + 1)]
+    pitch_angles, _ = generate_paraboloid_layer_geometry(
+        clear_aperture, orbital_radius, len(layer_lengths)
+    )
+
+    for flat_idx, agent_id in enumerate(flat_config):
+        pres_layer, pres_pos = to_layer_index(layer_lengths, flat_idx)
+        true_layer, _ = to_layer_index(layer_lengths, agent_id)
+
+        # Roll is 0.0 by default
+        desired_attitudes[agent_id][1] = np.pi / 2.0 - pitch_angles[true_layer]  # Pitch
+        desired_attitudes[agent_id][2] = (2.0 * np.pi * pres_pos) / layer_lengths[
+            pres_layer
+        ]  # Yaw
+
+        # Normalize yaw to [-π, π]
+        if desired_attitudes[agent_id][2] > np.pi:
+            desired_attitudes[agent_id][2] -= 2.0 * np.pi
+
+    return desired_attitudes
+
+
+def generate_paraboloid_layer_geometry(clear_aperture, orbital_radius, num_layers):
+    """
+    Generate concentric layer parameters for agents arranged on a parabolic surface.
+
+    Parameters
+    ----------
+    clear_aperture : float
+        Diameter of the telescope aperture.
+    orbital_radius : float
+        Distance from the center to the vertex of the parabola.
+    num_layers : int
+        Number of concentric layers to compute.
+
+    Returns
+    -------
+    tuple
+        - List of pitch angles (Thetas) for each layer
+        - List of (XY_radius, Z_offset) tuples for each layer
+    """
+
+    def surface_equation(theta_i, theta_list):
+        sin_sum = np.sum(np.sin(theta_list)) + np.sin(theta_i)
+        cos_sum = np.sum(np.cos(theta_list)) + np.cos(theta_i)
+        lhs = clear_aperture * (0.5 + sin_sum)
+        rhs = clear_aperture * (clear_aperture / (8.0 * orbital_radius) + cos_sum)
+        return (lhs**2) / (2.0 * orbital_radius) - rhs
+
+    thetas = []
+    positions = [(clear_aperture / 2.0, (clear_aperture**2) / (8.0 * orbital_radius))]
+
+    for _ in range(num_layers):
+        theta_i = fsolve(lambda t: surface_equation(t, thetas), 0)[0]
+        thetas.append(theta_i)
+
+        xy_radius = clear_aperture * (0.5 + np.sum(np.sin(thetas)))
+        z_offset = clear_aperture * (
+            clear_aperture / (8.0 * orbital_radius) + np.sum(np.cos(thetas))
         )
-    return R_T
+        positions.append((xy_radius, z_offset))
 
-
-# Calculate specific attitudes for all agents
-def calcTheta_d(CA, R, LayerLens, fConfig):
-    Theta_d = [[0.0, 0.0, 0.0] for j in range(len(fConfig) + 1)]
-    Pitches, _ = parabolicParams(CA, R, len(LayerLens))
-    for listPoint, agent in enumerate(fConfig):
-        presLayerNum, presPointNum = listPointToTwoDimPoint(LayerLens, listPoint)
-        trueLayerNum, truePointNum = listPointToTwoDimPoint(LayerLens, agent)
-        Theta_d[agent][1] = np.pi / 2.0 - Pitches[trueLayerNum]
-        Theta_d[agent][2] = presPointNum * 2.0 * np.pi / LayerLens[presLayerNum]
-        if Theta_d[agent][2] > np.pi:
-            Theta_d[agent][2] -= 2.0 * np.pi
-    return Theta_d
-
-
-# Generate generic positions and attitudes based on layer number
-def parabolicParams(CA, R, l):
-    def equations(theta_i, Thetas):
-        lhs = CA * (0.5 + np.sum([np.sin(theta) for theta in Thetas]) + np.sin(theta_i))
-        rhs = CA * (
-            CA / (8.0 * R)
-            + np.sum([np.cos(theta) for theta in Thetas])
-            + np.cos(theta_i)
-        )
-        return (lhs**2) / (2.0 * R) - rhs
-
-    Thetas = []
-    Ps = [(CA / 2.0, CA**2 / (8.0 * R))]
-    for i in range(l):
-        theta_i = fsolve(equations, 0, Thetas)
-        Thetas.append(theta_i[0])
-        p_i = (
-            CA * (0.5 + np.sum([np.sin(theta) for theta in Thetas])),
-            CA * (CA / (8.0 * R) + np.sum([np.cos(theta) for theta in Thetas])),
-        )
-        Ps.append(p_i)
-    return Thetas, Ps
+    return thetas, positions

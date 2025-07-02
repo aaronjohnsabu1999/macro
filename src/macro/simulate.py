@@ -20,13 +20,13 @@ mplplt.style.use("fivethirtyeight")
 
 
 # Simulations
-def simulateMPL(title, X, Y, Z, labels, nframes):  # Simulate using Matplotlib
+def simulateMPL(title, X, Y, Z, labels, num_frames):  # Simulate using Matplotlib
     def init():
         return ax
 
     def animate(frame):
         plots = []
-        for agent in range(numAgents):
+        for agent in range(num_agents):
             plots.append(
                 ax.plot(
                     X[agent][frame],
@@ -38,11 +38,11 @@ def simulateMPL(title, X, Y, Z, labels, nframes):  # Simulate using Matplotlib
             )
         return plots
 
-    numAgents = len(X)
+    num_agents = len(X)
     xlim = (min(X[0]), max(X[0]))
     ylim = (min(Y[0]), max(Y[0]))
     zlim = (min(Z[0]), max(Z[0]))
-    for agent in range(numAgents):
+    for agent in range(num_agents):
         xlim = (min(xlim[0], min(X[agent])), max(xlim[1], max(X[agent])))
         ylim = (min(ylim[0], min(Y[agent])), max(ylim[1], max(Y[agent])))
         zlim = (min(zlim[0], min(Z[agent])), max(zlim[1], max(Z[agent])))
@@ -54,7 +54,7 @@ def simulateMPL(title, X, Y, Z, labels, nframes):  # Simulate using Matplotlib
     ax.set_zlabel("Z")
     ax.azim = 140
     ax.elev = -45
-    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=nframes)
+    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=num_frames)
     anim.save(title, fps=20, writer="Pillow", progress_callback=lambda i, n: print(i))
 
 
@@ -89,8 +89,8 @@ def simulatePL(title, X, Y, Z, labels):  # Simulate using Plotly
 
 
 def plotRPY(Theta):
-    numAgents = len(Theta) - 1
+    num_agents = len(Theta) - 1
     for dim in range(3):
-        for agent in range(numAgents):
+        for agent in range(num_agents):
             mplplt.plot([Theta[agent][i][dim] for i in range(len(Theta[agent]))])
         mplplt.show()

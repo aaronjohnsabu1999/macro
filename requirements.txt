@@ -8,8 +8,6 @@ black==25.1.0
     # via macro (pyproject.toml)
 click==8.2.1
     # via black
-colorama==0.4.6
-    # via click
 contourpy==1.3.2
     # via matplotlib
 cycler==0.12.1
@@ -24,6 +22,8 @@ mypy-extensions==1.1.0
     # via black
 narwhals==1.44.0
     # via plotly
+networkx==3.5
+    # via macro (pyproject.toml)
 numpy==2.3.1
     # via
     #   contourpy
