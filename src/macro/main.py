@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as mplplt
 import plotly.graph_objects as go
 
-from macro.ifmea import ifmea_commands
+from macro.ifmea import IFMEAEngine
 from macro.mirror import (
     generate_target_positions,
     calc_number_of_layers,
@@ -168,9 +168,10 @@ class Macro:
                 traj[agent, dim] = []
         all_neighbors, all_flat_config = [], []
         R_0 = self.R_f
-        IFMEA = ifmea_commands(current_config)
+        IFMEA = IFMEAEngine(current_config)
+        commands = IFMEA.run()
 
-        for command in IFMEA:
+        for command in commands:
             for _ in range(command[4]):
                 if command[0] == "R":
                     r = self.flat_config[command[1] : command[2] + 1]

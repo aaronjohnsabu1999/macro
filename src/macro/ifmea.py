@@ -12,161 +12,271 @@
 import numpy as np
 
 from macro.graph import SystemGraph
-from macro.utils import to_flat_index
+from macro.utils import NullLogger
+
+np.random.seed(42)  # For reproducibility
 
 
-def find_nearest_mismatch(config, next_config, layer_idx, pos_idx):
-    """Find the nearest mismatch in the next layer configuration."""
-    n_L_next = len(next_config)
-    for dist in range(int(n_L_next / 2) + 1):
-        upper = (pos_idx * 2 + dist) % n_L_next
-        lower = (pos_idx * 2 - dist) % n_L_next
-        if next_config[upper] != layer_idx + 2:
-            mismatch_idx = upper
-            break
-        elif next_config[lower] != layer_idx + 2:
-            mismatch_idx = lower
-            break
-    closest = int(np.floor(mismatch_idx / 2))
-    if closest < pos_idx:
-        closest += mismatch_idx % 2
-    return mismatch_idx, closest
-
-
-def ifmea_commands(layer_config, *args, **kwargs):
+class IFMEAEngine:
     """
-    Generate rotation and exchange commands to transform a layered configuration
-    into a final, ordered structure using the IFMEA algorithm.
+    Initialize the IFMEAEngine with a given layer configuration and optional layer types.
 
     Parameters
     ----------
     layer_config : list[list[int]]
-        Nested list representing agents in each concentric layer.
+        The nested list representing agents in concentric layers.
+    layer_type : list[int], optional
+        List of target types corresponding to each layer.
     *args, **kwargs :
-        Optional arguments, including:
-        - graph: pre-initialized SystemGraph object (optional)
-
-    Returns
-    -------
-    list[tuple]
-        A list of commands representing the transformations:
-        - ("R", start_idx, end_idx, direction, steps) for rotation
-        - ("E", idx1, idx2, idx3, 1) for three-agent exchanges
+        Optional keyword arguments including:
+        - graph: a pre-initialized SystemGraph object.
     """
-    commands = []
-    if not layer_config:
-        raise ValueError("Layer configuration cannot be empty.")
-    if not isinstance(layer_config, list) or not all(
-        isinstance(layer, list) for layer in layer_config
-    ):
-        raise TypeError("Layer configuration must be a list of lists.")
-    layer_type = kwargs.get("layer_type", list(range(len(layer_config))))
-    if not isinstance(layer_type, list):
-        raise TypeError("Layer type must be a list of integers.")
-    if len(layer_config) != len(layer_type):
-        raise ValueError(
-            "Layer configuration and layer type must have the same number of layers."
-        )
 
-    flat_config = [agent for layer in layer_config for agent in layer]
-    graph = kwargs.get("graph", SystemGraph(layer_config, flat_config))
-    layer_lengths = graph.get_layer_lengths()
+    def __init__(self, layer_config=None, layer_type=None, *args, **kwargs):
+        """
+        Initialize the IFMEAEngine with layer configuration and type.
+        """
+        self.layer_config = layer_config
+        self.layer_type = layer_type
+        self.commands = []
+        self.logger = kwargs.get("logger", NullLogger())
 
-    print("Initial Layer Configuration:", layer_config)
+        if layer_config is not None:
+            self.set_layer_config(layer_config, layer_type, **kwargs)
 
-    # Work from outermost layer inward
-    outer_layer_idx = len(layer_config) - 1
-    while outer_layer_idx > 0:
+    def set_layer_config(self, layer_config, layer_type=None, **kwargs):
+        """
+        Set the layer configuration for the IFMEAEngine.
+
+        Parameters
+        ----------
+        layer_config : list[list[int]]
+            The new layer configuration to set.
+        """
+        self.layer_config = layer_config
+        self.layer_type = layer_type or list(range(len(layer_config)))
+        self._validate_inputs()
+
+        self.flat_config = [agent for layer in layer_config for agent in layer]
+        self.graph = kwargs.get("graph", SystemGraph(layer_config, self.flat_config))
+        self.layer_lengths = self.graph.get_layer_lengths()
+
+    def _validate_inputs(self):
+        """Validate input types and lengths."""
+        if not self.layer_config:
+            raise ValueError("Layer configuration cannot be empty.")
+        if not isinstance(self.layer_config, list) or not all(
+            isinstance(layer, list) for layer in self.layer_config
+        ):
+            raise TypeError("Layer configuration must be a list of lists.")
+        if not isinstance(self.layer_type, list):
+            raise TypeError("Layer type must be a list of integers.")
+        if len(self.layer_config) != len(self.layer_type):
+            raise ValueError(
+                "Layer configuration and layer type must have the same number of layers."
+            )
+
+    def _find_nearest_mismatch(self, outer_layer_idx, inner_layer_idx, curr_idx):
+        """
+        Find the closest agent in the next layer (layer_idx+1) that has the lowest type,
+        starting from a target index calculated from the current position.
+
+        Parameters
+        ----------
+        layer_idx : int
+            Index of the current inner layer.
+        pos_idx : int
+            Index of the current agent within the inner layer.
+
+        Returns
+        -------
+        tuple[int, int]
+            The index of the mismatch in the next layer, and the target index to align with.
+        """
+        curr_layer = self.graph.get_layer_config()[inner_layer_idx]
+        next_layer = self.graph.get_layer_config()[inner_layer_idx + 1]
+        len_curr = len(curr_layer)
+        len_next = len(next_layer)
+
+        next_idx = int(curr_idx * len_next / len_curr)
+        mismatch_idx = next_idx
+
+        for dist in range(int(len_next / 2) + 1):
+            upper = (next_idx + dist) % len_next
+            lower = (next_idx - dist) % len_next
+            if next_layer[upper] < outer_layer_idx + 1:
+                mismatch_idx = upper
+                break
+            elif next_layer[lower] < outer_layer_idx + 1:
+                mismatch_idx = lower
+                break
+
+        return mismatch_idx, next_idx
+
+    def step_layer(self, outer_layer_idx):
+        """
+        Process a single outer layer, identifying and resolving mismatches between it
+        and the layer directly beneath by issuing rotations or exchanges.
+
+        Parameters
+        ----------
+        outer_layer_idx : int
+            The index of the outer layer to process.
+        """
         inner_layer_idx = 0
 
         while inner_layer_idx != outer_layer_idx:
+            self.logger.debug(
+                f"Processing inner layer {inner_layer_idx} for outer layer {outer_layer_idx}"
+            )
+            self.logger.debug(
+                f"Configuration before processing: {self.graph.get_layer_config()}"
+            )
             try:
                 # Find position of agent needing to move up
-                pos_idx = graph.get_layer_config()[inner_layer_idx].index(
+                curr_idx = self.graph.get_layer_config()[inner_layer_idx].index(
                     outer_layer_idx + 1
                 )
             except ValueError:
-                if inner_layer_idx == 0:
-                    break
-                inner_layer_idx -= 1
+                inner_layer_idx += 1
                 continue
 
             # Find closest mismatch position in the layer above
-            mismatch_idx, target_pos_idx = find_nearest_mismatch(
-                graph.get_layer_config()[inner_layer_idx],
-                graph.get_layer_config()[inner_layer_idx + 1],
-                inner_layer_idx,
-                pos_idx,
+            mismatch_idx, next_idx = self._find_nearest_mismatch(
+                outer_layer_idx, inner_layer_idx, curr_idx
             )
 
             # Rotate to align source and target
-            if target_pos_idx != pos_idx:
-                shift = target_pos_idx - pos_idx
-                graph.rotate_layer(inner_layer_idx, shift)
-                commands.append(
-                    (
-                        "R",
-                        to_flat_index(layer_lengths, inner_layer_idx, 0),
-                        to_flat_index(layer_lengths, inner_layer_idx + 1, 0) - 1,
-                        int(shift / abs(shift)),
-                        abs(shift),
-                    )
-                )
+            shift = (next_idx - mismatch_idx) % self.layer_lengths[inner_layer_idx + 1]
+            self.logger.debug(
+                f"Shifting layer {inner_layer_idx + 1} by {shift} positions to align with target."
+            )
+            if shift != 0:
+                self.graph.rotate_layer(inner_layer_idx + 1, shift)
+                self.commands.append(("R", inner_layer_idx + 1, shift))
 
-            # Perform exchange (depending on whether mismatch is left or right)
-            if mismatch_idx < 2 * target_pos_idx:
-                third_idx = target_pos_idx - 1
+            # Perform exchange of positions
+            third_dir = (
+                next_idx / self.layer_lengths[inner_layer_idx + 1]
+                < curr_idx / self.layer_lengths[inner_layer_idx]
+            )
+            if third_dir:
+                # Mismatch is to the left of target
+                third_idx = (curr_idx - 1) % self.layer_lengths[inner_layer_idx]
             else:
-                third_idx = (target_pos_idx + 1) % layer_lengths[inner_layer_idx]
+                # Mismatch is to the right of target
+                third_idx = (curr_idx + 1) % self.layer_lengths[inner_layer_idx]
 
-            graph.exchange_positions(
-                (inner_layer_idx, target_pos_idx),
-                (inner_layer_idx + 1, mismatch_idx),
+            self.logger.debug(
+                f"Exchanging positions: {curr_idx} in layer {inner_layer_idx} of type {self.layer_config[inner_layer_idx][curr_idx]}, {next_idx} in layer {inner_layer_idx + 1} of type {self.layer_config[inner_layer_idx + 1][next_idx]}, and {third_idx} in layer {inner_layer_idx} of type {self.layer_config[inner_layer_idx][third_idx]}"
+            )
+            self.graph.exchange_positions(
+                (inner_layer_idx, curr_idx),
+                (inner_layer_idx + 1, next_idx),
                 (inner_layer_idx, third_idx),
             )
-            commands.append(
+            self.commands.append(
                 (
                     "E",
-                    to_flat_index(layer_lengths, inner_layer_idx, target_pos_idx),
-                    to_flat_index(layer_lengths, inner_layer_idx + 1, mismatch_idx),
-                    to_flat_index(layer_lengths, inner_layer_idx, third_idx),
-                    1,
+                    (inner_layer_idx, curr_idx),
+                    (inner_layer_idx + 1, next_idx),
+                    (inner_layer_idx, third_idx),
                 )
             )
+            self.logger.debug(
+                f"Configuration after processing: {self.graph.get_layer_config()}"
+            )
 
-            # Allow upward re-checking
-            if inner_layer_idx < outer_layer_idx - 1:
-                inner_layer_idx += 1
+    def run(self):
+        """
+        Run the IFMEA algorithm from the outermost to the innermost layer.
 
-        outer_layer_idx -= 1
+        Returns
+        -------
+        list[tuple]
+            A list of commands executed by the algorithm.
+        """
+        self.logger.info("Starting IFMEA algorithm run.")
+        if not self.layer_config:
+            self.logger.warning("Layer configuration is empty, no commands generated.")
+            return self.commands
+        self.logger.info(f"Initial layer configuration: {self.layer_config}")
+        if not self.graph.is_connected():
+            self.logger.error("Graph is not connected, cannot run IFMEA.")
+            return self.commands
+        for outer_layer_idx in reversed(range(1, len(self.layer_config))):
+            self.logger.debug(f"Processing outer layer {outer_layer_idx}")
+            self.step_layer(outer_layer_idx)
+        self.logger.info(f"Final layer configuration: {self.graph.get_layer_config()}")
+        if not self.commands:
+            self.logger.warning("No commands generated during IFMEA run.")
+        else:
+            self.logger.info(f"Total commands generated: {len(self.commands)}")
+        self.logger.info(f"Commands: {self.commands}")
+        return self.commands
 
-    print("Final Layer Configuration:", graph.get_layer_config())
-    return commands
+    def get_commands(self):
+        """
+        Get the list of commands generated by the IFMEA algorithm.
+
+        Returns
+        -------
+        list[tuple]
+            The list of commands.
+        """
+        return self.commands
+
+    def get_layer_config(self):
+        """
+        Get the current layer configuration of the graph.
+
+        Returns
+        -------
+        list[list[int]]
+            The current layer configuration.
+        """
+        return self.graph.get_layer_config()
 
 
 if __name__ == "__main__":
-    # Define how many of each type we need
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
     counts = {
         1: 6,
         2: 12,
         3: 18,
         4: 24,
         5: 30,
+        6: 30,
+        7: 24,
+        8: 18,
+        9: 12,
+        10: 6,
+        11: 1,
+        12: 1,
     }
+    layer_sizes = [counts[i] for i in range(1, len(counts) + 1)]
 
-    # Create the full list of agents
-    all_agents = [agent_type for agent_type, count in counts.items() for _ in range(count)]
-    np.random.shuffle(all_agents)
+    ifmea_engine = IFMEAEngine(logger=logger)
+    all_agents = [
+        agent_type for agent_type, count in counts.items() for _ in range(count)
+    ]
 
-    # Define layer sizes
-    layer_sizes = [counts[i] for i in range(1, 6)]
+    for i in range(1):
+        np.random.shuffle(all_agents)
 
-    # Split shuffled agents into layers
-    init_layer_config = []
-    idx = 0
-    for size in layer_sizes:
-        init_layer_config.append(all_agents[idx:idx + size])
-        idx += size
+        init_layer_config = []
+        idx = 0
+        for size in layer_sizes:
+            init_layer_config.append(all_agents[idx : idx + size])
+            idx += size
 
-    print(ifmea_commands(init_layer_config))
-
+        ifmea_engine.set_layer_config(init_layer_config)
+        ifmea_engine.run()
