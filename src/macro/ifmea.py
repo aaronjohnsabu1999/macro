@@ -10,114 +10,155 @@
 # ***********************************************************/
 
 from math import floor
+from macro.graph import SystemGraph
+
+from macro.utils import to_layer_index, to_flat_index
 
 
-def twoDimPointToListPoint(layerLens, presentLayerNum, presentPosNum):
-    sumUptoLayer = 0
-    for layerLen in layerLens[:presentLayerNum]:
-        sumUptoLayer += layerLen
-    return sumUptoLayer + (presentPosNum % layerLens[presentLayerNum])
-
-
-def listPointToTwoDimPoint(layerLens, listPoint):
-    for layerNum, layerLen in enumerate(layerLens):
-        if listPoint < layerLen:
-            return (layerNum, listPoint)
-        listPoint -= layerLen
-
-
-def findNearestMismatch(config, nextConfig, presentLayerNum, presentPosNum):
-    n_L_prst = len(config)
-    n_L_next = len(nextConfig)
-    for dist in range(0, int(n_L_next / 2) + 1):
-        upper = (presentPosNum * 2 + dist) % n_L_next
-        lower = (presentPosNum * 2 - dist) % n_L_next
-        if nextConfig[upper] != presentLayerNum + 2:
-            nextLayerMismatch = upper
+def find_nearest_mismatch(config, next_config, layer_idx, pos_idx):
+    """Find the nearest mismatch in the next layer configuration."""
+    n_L_next = len(next_config)
+    for dist in range(int(n_L_next / 2) + 1):
+        upper = (pos_idx * 2 + dist) % n_L_next
+        lower = (pos_idx * 2 - dist) % n_L_next
+        if next_config[upper] != layer_idx + 2:
+            mismatch_idx = upper
             break
-        elif nextConfig[lower] != presentLayerNum + 2:
-            nextLayerMismatch = lower
+        elif next_config[lower] != layer_idx + 2:
+            mismatch_idx = lower
             break
-    presLayerMMClosest = floor(nextLayerMismatch / 2)
-    if presLayerMMClosest < presentPosNum:
-        presLayerMMClosest += nextLayerMismatch % 2
-    return nextLayerMismatch, presLayerMMClosest
+    closest = floor(mismatch_idx / 2)
+    if closest < pos_idx:
+        closest += mismatch_idx % 2
+    return mismatch_idx, closest
 
 
-def rotateConfig(layer, diff):
-    for i in range(abs(diff)):
-        layer = layer[-int(diff / abs(diff)) :] + layer[: -int(diff / abs(diff))]
-    return layer
+def ifmea_commands(layer_config, *args, **kwargs):
+    """
+    Generate rotation and exchange commands to transform a layered configuration
+    into a final, ordered structure using the IFMEA algorithm.
 
+    Parameters
+    ----------
+    layer_config : list[list[int]]
+        Nested list representing agents in each concentric layer.
+    *args, **kwargs :
+        Optional arguments, including:
+        - graph: pre-initialized SystemGraph object (optional)
 
-def exchangeConfig(config, P1, P2, P3):
-    config[P1[0]][P1[1]], config[P2[0]][P2[1]], config[P3[0]][P3[1]] = (
-        config[P3[0]][P3[1]],
-        config[P1[0]][P1[1]],
-        config[P2[0]][P2[1]],
-    )
-    return config
-
-
-def ifmea(config):
-    N = len(config) - 1
+    Returns
+    -------
+    list[tuple]
+        A list of commands representing the transformations:
+        - ("R", start_idx, end_idx, direction, steps) for rotation
+        - ("E", idx1, idx2, idx3, 1) for three-agent exchanges
+    """
     commands = []
-    layerLens = [len(layer) for layer in config]
-    while not N == 0:
-        i = N - 1
-        while not i == -1:
+    # layer_type is either in kwargs or it is 0 for the root and increases by 1 for each layer aka the index of the layer
+    # the idea of ifmea is to work from the outermost layer inward, so we start with the outermost layer
+    # we try to match agent_type to layer_type by performing rotations and exchanges
+    if not layer_config:
+        raise ValueError("Layer configuration cannot be empty.")
+    if not isinstance(layer_config, list) or not all(
+        isinstance(layer, list) for layer in layer_config
+    ):
+        raise TypeError("Layer configuration must be a list of lists.")
+    layer_type = kwargs.get("layer_type", list(range(len(layer_config))))
+    if not isinstance(layer_type, list):
+        raise TypeError("Layer type must be a list of integers.")
+    if len(layer_config) != len(layer_type):
+        raise ValueError(
+            "Layer configuration and layer type must have the same number of layers."
+        )
+
+    flat_config = [agent for layer in layer_config for agent in layer]
+    graph = kwargs.get("graph", SystemGraph(layer_config, flat_config))
+    layer_lengths = graph.get_layer_lengths()
+
+    # Work from outermost layer inward
+    outer_layer_idx = len(layer_config) - 1
+    while outer_layer_idx > 0:
+        print(f"Processing layer {outer_layer_idx}...")
+        inner_layer_idx = 0
+
+        while inner_layer_idx != outer_layer_idx:
+            print(f"Checking layer {inner_layer_idx}...")
             try:
-                j = config[i].index(N + 1)
-            except:
-                i -= 1
+                # Find position of agent needing to move up
+                pos_idx = graph.get_layer_config()[inner_layer_idx].index(
+                    outer_layer_idx + 1
+                )
+                print(f"Found position {pos_idx} in layer {inner_layer_idx}.")
+            except ValueError:
+                inner_layer_idx -= 1
+                print(f"No agent to move up in layer {inner_layer_idx + 1}.")
                 continue
-            m, l = findNearestMismatch(config[i], config[i + 1], i, j)
-            if l - j != 0:
-                config[i] = rotateConfig(config[i], l - j)
+
+            # Find closest mismatch position in the layer above
+            mismatch_idx, target_pos_idx = find_nearest_mismatch(
+                graph.get_layer_config()[inner_layer_idx],
+                graph.get_layer_config()[inner_layer_idx + 1],
+                inner_layer_idx,
+                pos_idx,
+            )
+            print(
+                f"Found mismatch at index {mismatch_idx} in layer {inner_layer_idx + 1}."
+            )
+
+            # Rotate to align source and target
+            if target_pos_idx != pos_idx:
+                shift = target_pos_idx - pos_idx
+                graph.rotate_layer(inner_layer_idx, shift)
                 commands.append(
                     (
                         "R",
-                        twoDimPointToListPoint(layerLens, i, 0),
-                        twoDimPointToListPoint(layerLens, i + 1, 0) - 1,
-                        int(l - j / abs(l - j)),
-                        abs(l - j),
+                        to_flat_index(layer_lengths, inner_layer_idx, 0),
+                        to_flat_index(layer_lengths, inner_layer_idx + 1, 0) - 1,
+                        int(shift / abs(shift)),
+                        abs(shift),
                     )
                 )
-            if m < l * 2:
-                config = exchangeConfig(config, (i, l), (i + 1, m), (i, l - 1))
-                commands.append(
-                    (
-                        "E",
-                        twoDimPointToListPoint(layerLens, i, l),
-                        twoDimPointToListPoint(layerLens, i + 1, m),
-                        twoDimPointToListPoint(layerLens, i, l - 1),
-                        1,
-                    )
-                )
+                print(f"Rotated layer {inner_layer_idx} by {shift} positions.")
+
+            # Perform exchange (depending on whether mismatch is left or right)
+            if mismatch_idx < 2 * target_pos_idx:
+                third_idx = target_pos_idx - 1
             else:
-                config = exchangeConfig(
-                    config, (i, l), (i + 1, m), (i, (l + 1) % layerLens[i])
+                third_idx = (target_pos_idx + 1) % layer_lengths[inner_layer_idx]
+
+            graph.exchange_positions(
+                to_flat_index(layer_lengths, inner_layer_idx, target_pos_idx),
+                to_flat_index(layer_lengths, inner_layer_idx + 1, mismatch_idx),
+                to_flat_index(layer_lengths, inner_layer_idx, third_idx),
+            )
+            commands.append(
+                (
+                    "E",
+                    to_flat_index(layer_lengths, inner_layer_idx, target_pos_idx),
+                    to_flat_index(layer_lengths, inner_layer_idx + 1, mismatch_idx),
+                    to_flat_index(layer_lengths, inner_layer_idx, third_idx),
+                    1,
                 )
-                commands.append(
-                    (
-                        "E",
-                        twoDimPointToListPoint(layerLens, i, l),
-                        twoDimPointToListPoint(layerLens, i + 1, m),
-                        twoDimPointToListPoint(layerLens, i, l + 1),
-                        1,
-                    )
-                )
-            if i < N - 1:
-                i = i + 1
-        N = N - 1
+            )
+            print(
+                f"Exchanged positions {target_pos_idx}, {mismatch_idx}, and {third_idx} in layers {inner_layer_idx} and {inner_layer_idx + 1}."
+            )
+            print("Layer config before step:", graph.get_layer_config())
+            input()
+
+            # Allow upward re-checking
+            if inner_layer_idx < outer_layer_idx - 1:
+                inner_layer_idx += 1
+
+        outer_layer_idx -= 1
 
     return commands
 
 
 if __name__ == "__main__":
-    initConfig = [
+    init_layer_config = [
         [1, 1, 3, 1, 2, 2],
         [2, 2, 1, 2, 2, 2, 2, 3, 2, 2, 2, 1],
         [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
     ]
-    print(ifmea(initConfig))
+    print(ifmea_commands(init_layer_config))

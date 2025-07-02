@@ -11,10 +11,15 @@ import numpy as np
 import matplotlib.pyplot as mplplt
 import plotly.graph_objects as go
 
-from macro.ifmea import ifmea, listPointToTwoDimPoint
-from macro.mirror import genR_f, layerCalc, calcTheta_d
-from macro.glideslope import Agent, GlideslopeSimulator
-from macro.utils import init_pose, consensus_step, NullLogger
+from macro.ifmea import ifmea_commands
+from macro.mirror import (
+    generate_target_positions,
+    calc_number_of_layers,
+    compute_desired_attitudes,
+)
+from macro.utils import init_pose, consensus_step, to_layer_index, NullLogger
+from macro.agent import Agent, OrbitalParams, SimulationParams
+from macro.glideslope import GlideslopeSimulator
 
 
 class Macro:
@@ -25,35 +30,31 @@ class Macro:
         self._init_params()
 
     def _init_params(self):
-        sim = self.config["simulation"]
-        form = self.config["formation"]
-        orbit = self.config["orbit"]
+        np.random.seed(self.config["simulation"].get("seed", 0))
 
-        np.random.seed(sim.get("seed", 0))
+        self.num_agents = self.config["formation"]["num_agents"]
+        self.num_jumps = self.config["formation"]["num_jumps"]
+        self.num_frames = self.config["simulation"]["num_frames"]
+        self.timestep = self.config["simulation"]["timestep"]
 
-        self.num_agents = form["num_agents"]
-        self.num_jumps = form["num_jumps"]
-        self.num_frames = sim["num_frames"]
-        self.dt = sim["dt"]
-
-        self.radius = orbit["radius"]
-        self.gravpar = orbit["gravpar"]
-        self.eccentricity = orbit["eccentricity"]
+        self.radius = self.config["orbit"]["radius"]
+        self.gravpar = self.config["orbit"]["gravpar"]
+        self.eccentricity = self.config["orbit"]["eccentricity"]
         self.ang_vel = np.sqrt(self.gravpar / self.radius**3)
         self.ang_mom = self.radius**2 * self.ang_vel
 
-        self.clear_aperture = form["clear_aperture"]
-        self.parab_radius = form["parabolic_radius"]
-        self.expansion = form["expansion"]
+        self.clear_aperture = self.config["formation"]["clear_aperture"]
+        self.parab_radius = self.config["formation"]["parab_radius"]
+        self.expansion = self.config["formation"]["expansion"]
 
         self.neighbors = np.zeros((self.num_agents, self.num_agents), dtype=int)
         self.agent_params = np.full(
             (self.num_agents + 1, self.num_agents + 1, 3),
             [0.5 * 4e-6, 0.5 * 8e-6, 0.5 * 8e-6],
         )
-        self.num_layers, self.layer_lens = layerCalc(self.num_agents)
+        self.num_layers, self.layer_lens = calc_number_of_layers(self.num_agents)
 
-        self.R_f0 = genR_f(
+        self.R_f0 = generate_target_positions(
             self.clear_aperture,
             self.parab_radius,
             self.num_agents,
@@ -65,34 +66,44 @@ class Macro:
         self.R_0, self.Theta = init_pose(self.num_agents, 5.00)
         self.R_I, _ = init_pose(self.num_agents, 0.01)
 
-        self.individuals = np.arange(self.num_agents)
+        self.flat_config = np.arange(self.num_agents)
         self.true_mapping = np.concatenate(
             [np.full(l, i + 1) for i, l in enumerate(self.layer_lens)]
         )
 
-    def _simulate_phase(self, start, end, stage_name, auction):
+    def _simulate_phase(self, start, end, stage_name, auction_type, use_config=False):
         agents = [
-            Agent(id=i, position=start[i], velocity=self.V_0[i], target=end[i])
+            Agent(
+                agent_id=i,
+                agent_type=1,
+                position=start[i],
+                velocity=self.V_0[i],
+                target=end[i],
+            )
             for i in range(self.num_agents)
         ]
+        orbit_params = OrbitalParams(
+            radius=self.radius,
+            eccentricity=self.eccentricity,
+            angular_momentum=self.ang_mom,
+            angular_velocity=self.ang_vel,
+        )
+        sim_params = SimulationParams(
+            num_jumps=self.num_jumps,
+            timestep=self.timestep,
+            num_frames=self.num_frames,
+            auction_type=auction_type,
+            use_config=use_config,
+            layer_config=self.true_mapping,
+            flat_config=self.flat_config,
+        )
         sim = GlideslopeSimulator(
-            agents,
-            self.neighbors,
-            self.config["formation"]["neighbor_radius"],
-            start,
-            self.V_0,
-            end,
-            self.radius,
-            self.eccentricity,
-            self.ang_mom,
-            self.ang_vel,
-            self.num_jumps,
-            self.dt,
-            self.num_frames,
-            auction_type=auction[0],
-            config_enabled=auction[1],
-            config=self.true_mapping,
-            fConfig=self.individuals,
+            agents=agents,
+            neighbor_matrix=self.neighbors,
+            neighbor_radius=self.config["formation"]["neighbor_radius"],
+            target_positions=end,
+            orbit=orbit_params,
+            sim=sim_params,
         )
         traj, *_ = sim.run()
         traj = np.array(list(traj.values()))  # ensure NumPy array conversion
@@ -150,95 +161,104 @@ class Macro:
         mplplt.tight_layout(rect=[0, 0, 1, 0.97])
         mplplt.show()
 
-    def _intra_formation_exchange(self, present_config):
-        Xs, Ys, Zs = np.empty((3, self.num_agents), dtype=object)
+    def _intra_formation_exchange(self, current_config):
+        traj = np.empty((self.num_agents, 3), dtype=object)
         for dim in range(3):
             for agent in range(self.num_agents):
-                Xs[dim, agent] = []
-        AllNeighbors, FConfig = [], []
+                traj[agent, dim] = []
+        all_neighbors, all_flat_config = [], []
         R_0 = self.R_f
-        IFMEA = ifmea(present_config)
+        IFMEA = ifmea_commands(current_config)
 
         for command in IFMEA:
             for _ in range(command[4]):
                 if command[0] == "R":
-                    r = self.individuals[command[1] : command[2] + 1]
+                    r = self.flat_config[command[1] : command[2] + 1]
                     r = np.concatenate((r[-command[3] :], r[: -command[3]]))
-                    self.individuals = np.concatenate(
+                    self.flat_config = np.concatenate(
                         (
-                            self.individuals[: command[1]],
+                            self.flat_config[: command[1]],
                             r,
-                            self.individuals[command[2] + 1 :],
+                            self.flat_config[command[2] + 1 :],
                         )
                     )
                 elif command[0] == "E":
                     R_0 = self.R_f.copy()
-                    i1, i2, i3 = [self.individuals[i] for i in command[1:4]]
+                    i1, i2, i3 = [self.flat_config[i] for i in command[1:4]]
                     self.R_f[[i1, i2, i3]] = self.R_f[[i2, i3, i1]]
                     (
-                        self.individuals[command[1]],
-                        self.individuals[command[2]],
-                        self.individuals[command[3]],
+                        self.flat_config[command[1]],
+                        self.flat_config[command[2]],
+                        self.flat_config[command[3]],
                     ) = (i3, i1, i2)
 
-                FConfig.append(self.individuals.copy())
-                for idx, agent in enumerate(self.individuals):
+                all_flat_config.append(self.flat_config.copy())
+                for idx, agent in enumerate(self.flat_config):
                     self.R_f[agent] = self.R_f0[idx]
 
                 X, Y, Z, _, out = self._simulate_phase(
-                    R_0, self.R_f, "Stage-02", (None, True)
+                    start=R_0,
+                    end=self.R_f,
+                    stage_name="Stage-02",
+                    auction_type=None,
+                    use_config=True,
                 )
-                AllNeighbors.append(out[1])
+                all_neighbors.append(out[1])
                 R_0 = self.R_f
                 for i in range(self.num_agents):
-                    Xs[0, i].extend(X[i])
-                    Xs[1, i].extend(Y[i])
-                    Xs[2, i].extend(Z[i])
+                    traj[i, 0].extend(X[i])
+                    traj[i, 1].extend(Y[i])
+                    traj[i, 2].extend(Z[i])
 
-        self._plot("Stage-02.html", Xs[0], Xs[1], Xs[2])
-        return AllNeighbors, FConfig
+        self._plot("Stage-02.html", traj[:, 0], traj[:, 1], traj[:, 2])
+        return all_neighbors, all_flat_config
 
-    def _attitude_consensus(self, AllNeighbors, FConfig):
-        for k in range(len(AllNeighbors)):
-            Theta_d = calcTheta_d(
-                self.clear_aperture, self.parab_radius, self.layer_lens, FConfig[k]
+    def _attitude_consensus(self, all_neighbors, all_flat_config):
+        for k in range(len(all_neighbors)):
+            theta_desired = compute_desired_attitudes(
+                self.clear_aperture,
+                self.parab_radius,
+                self.layer_lens,
+                all_flat_config[k],
             )
+            neighbors = all_neighbors[k][0][1]  # assuming consistent structure
             for i in range(self.num_frames):
-                Neighbors = AllNeighbors[k][0][1]
-                tempTheta = [
-                    consensus_step(
-                        agent,
-                        self.Theta,
-                        Theta_d,
-                        Neighbors[agent],
-                        self.agent_params[agent],
-                        self.dt,
-                        i,
+                Theta_copy = self.Theta.copy()
+                for agent_id in range(self.num_agents):
+                    self.Theta[agent_id].append(
+                        consensus_step(
+                            agent_index=agent_id,
+                            value_history=Theta_copy,
+                            desired_value=theta_desired,
+                            neighbor_indices=neighbors[agent_id],
+                            control_gains=self.agent_params[agent_id],
+                            timestep=self.timestep,
+                            iteration_count=i,
+                        )
                     )
-                    for agent in range(self.num_agents)
-                ] + [[0.0, 0.0, 0.0]]
-                for agent in range(self.num_agents):
-                    self.Theta[agent].append(tempTheta[agent])
         self._plot_attitude_angles()
 
     def run(self):
         _, _, _, _ = self._simulate_phase(
-            self.R_0, self.R_I, "Stage-01A", ("Hybrid", False)
+            start=self.R_0, end=self.R_I, stage_name="Stage-01A", auction_type="Hybrid"
         )
         X, Y, Z, _, _ = self._simulate_phase(
-            self.R_I, self.R_f, "Stage-01B", ("Hybrid", False)
+            start=self.R_I,
+            end=self.R_f,
+            stage_name="Stage-01B",
+            auction_type="Hybrid",
         )
 
         present = [[] for _ in range(len(self.layer_lens))]
         for agent in range(self.num_agents):
             r_0 = np.array([X[agent, -1], Y[agent, -1], Z[agent, -1]])
-            idx, _ = listPointToTwoDimPoint(
+            idx, _ = to_layer_index(
                 self.layer_lens, np.argmin(np.linalg.norm(self.R_f - r_0, axis=1))
             )
             present[idx].append(self.true_mapping[agent])
 
-        AllNeighbors, FConfig = self._intra_formation_exchange(present)
-        self._attitude_consensus(AllNeighbors, FConfig)
+        all_neighbors, all_flat_config = self._intra_formation_exchange(present)
+        self._attitude_consensus(all_neighbors, all_flat_config)
 
 
 if __name__ == "__main__":

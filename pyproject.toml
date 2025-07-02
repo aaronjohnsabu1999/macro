@@ -17,6 +17,7 @@ dependencies = [
     "scipy",
     "plotly",
     "pyyaml",
+    "networkx",
     "matplotlib",
 ]
 

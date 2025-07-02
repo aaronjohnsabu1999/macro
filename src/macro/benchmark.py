@@ -13,12 +13,8 @@ import copy
 import numpy as np
 
 from macro.simulate import simulatePL
-from macro.glideslope import (
-    Agent,
-    OrbitalParams,
-    SimulationParams,
-    GlideslopeSimulation,
-)
+from macro.glideslope import GlideslopeSimulation
+from macro.agent import Agent, OrbitalParams, SimulationParams
 from macro.utils import init_pose, load_config
 
 
@@ -49,13 +45,13 @@ class BenchmarkRunner:
 
     def _create_simulation_params(self):
         return SimulationParams(
-            num_phases=self.num_jumps,
-            timestep=self.config["simulation"]["dt"],
-            total_frames=self.config["simulation"]["num_frames"],
+            num_jumps=self.num_jumps,
+            timestep=self.config["simulation"]["timestep"],
+            num_frames=self.config["simulation"]["num_frames"],
             auction_type=self.config["simulation"]["auction_type"],
             use_config=self.config["simulation"]["use_config"],
-            config_data=[[1, 2, 1, 1, 1, 2], [2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2]],
-            config_order=[i for i in range(self.num_agents)],
+            layer_config=[[1, 2, 1, 1, 1, 2], [2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2]],
+            flat_config=[i for i in range(self.num_agents)],
         )
 
     def _get_initial_positions(self):
@@ -193,12 +189,20 @@ class BenchmarkRunner:
     def run(self, auction_types):
         simulation = GlideslopeSimulation(
             agents=[
-                Agent(init_pose(self.R_0[i]), self.orbit)
+                Agent(
+                    agent_id=i,
+                    agent_type=1,
+                    position=self.R_0[i],
+                    velocity=np.zeros(3),
+                    target=self.R_f[i],
+                )
                 for i in range(self.num_agents)
             ],
-            R_f=self.R_f,
-            neighbors=self.neighbors,
-            sim_params=copy.deepcopy(self.sim_params),
+            neighbors_matrix=self.neighbors,
+            neighbor_radius=self.config["simulation"]["neighbor_radius"],
+            target_positions=self.R_f,
+            orbit=self.orbit,
+            sim=self.sim_params,
         )
         for auction_type in auction_types:
             self.sim_params.auction_type = auction_type

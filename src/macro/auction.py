@@ -14,7 +14,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from scipy.optimize import linear_sum_assignment
 
-from macro.utils import is_connected, gen_cost, NullLogger
+from macro.utils import gen_cost, NullLogger
 
 
 auction_map = {
@@ -155,7 +155,7 @@ class DistributedAuction(Auction):
             np.ndarray: Final assigned targets after convergence.
         """
         self.logger.debug("Starting distributed auction assignment")
-        if not is_connected(self.G):
+        if not self.G.is_connected():
             return self.R_f
 
         beta = [gen_cost(r_0, self.R_f, False) for r_0 in self.R_0]
@@ -208,7 +208,7 @@ class ConsensusAuction(Auction):
             np.ndarray: Final target assignments after consensus.
         """
         self.logger.debug("Starting consensus auction assignment")
-        if not is_connected(self.G):
+        if not self.G.is_connected():
             return self.R_f
 
         c = [gen_cost(r_0, self.R_f) for r_0 in self.R_0]
@@ -267,7 +267,7 @@ class HybridAuction(Auction):
             np.ndarray: Final target assignments.
         """
         self.logger.debug("Starting hybrid auction assignment")
-        if not is_connected(self.G):
+        if not self.G.is_connected():
             self.logger.debug("Graph is not connected, using greedy auction")
             return GreedyAuction(self.R_0, self.R_f, self.G).assign()
         else:
