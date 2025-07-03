@@ -132,7 +132,7 @@ class Macro:
         mplplt.style.use("fivethirtyeight")
         labels = ["Roll", "Pitch", "Yaw"]
         fig, axes = mplplt.subplots(
-            3, 1, figsize=(10, 10), sharex=True, constrained_layout=True
+            3, 1, figsize=(12, 10), sharex=True, constrained_layout=True
         )
         for dim, ax in enumerate(axes):
             for agent in range(self.num_agents):

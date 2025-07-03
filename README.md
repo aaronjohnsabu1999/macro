@@ -10,32 +10,6 @@ MACRO provides tools to simulate autonomous formation flying of multiple spacecr
 
 It is well acknowledged that human-made technology is not always at par with human curiosity, and an example is the inability to send large telescopes to outer space despite their higher resolution and less atmospheric interference. In this paper, we develop a framework for autonomous in-orbit construction using spacecraft formation such that a large telescope can be built in an elliptic orbit using multiple spacecraft. We split this problem into four steps for converging the position and attitude of each spacecraft at predefined values around a central spacecraft. Each spacecraft performs attitude synchronization with its neighbors to match its three degrees of freedom in orientation as a parabolic mirror. Simulations validate our proposed methods and the paper concludes with an open possibility of using other techniques to improve upon existing results. -->
 
-## Installation
-
-This project requires Python 3.11. To set up the development environment using Conda:
-
-```bash
-# Create a new environment from the YAML file
-conda env create -f environment.yml
-
-# Activate the environment
-conda activate macro
-
-# (Optional) Install the project in editable mode with dev dependencies
-pip install -e .[dev]
-```
-
-## Usage
-
-Run the main simulation entry point:
-
-```bash
-python run.py
-```
-
-Simulation output will be written to HTML files in the working directory. 
-Adjust parameters in `src/main.py` to explore different scenarios.
-
 ## Repository Structure
 
 ```
@@ -65,6 +39,40 @@ Adjust parameters in `src/main.py` to explore different scenarios.
 ├── README.md             # Project overview and setup instructions
 ├── LICENSE               # License file
 └── .gitignore
+```
+
+## Installation
+
+This project requires Python 3.11. To set up the development environment using Conda:
+
+```bash
+# Create a new environment from the YAML file
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate macro
+
+# (Optional) Install the project in editable mode with dev dependencies
+pip install -e .[dev]
+```
+
+## Usage
+
+Run the main simulation entry point:
+
+```bash
+python run.py
+```
+
+Simulation output will be written to HTML files in the working directory. 
+Adjust parameters in `src/main.py` to explore different scenarios.
+
+## Testing
+
+You can test the full simulation pipeline using:
+
+```bash
+pytest tests/test_main.py -v
 ```
 
 ## Contributing
