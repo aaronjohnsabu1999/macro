@@ -10,12 +10,12 @@
 # ***********************************************************/
 
 import numpy as np
+
 from macro.auction import auction_map
 from macro.utils import time_to_true_anomaly
 from macro.maneuvers import compute_state_transition_matrix, compute_maneuver_points
 from macro.graph import SystemGraph
 from macro.agent import Agent, OrbitalParams, SimulationParams
-
 
 class GlideslopeSimulator:
     def __init__(

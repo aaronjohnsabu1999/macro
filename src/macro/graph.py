@@ -80,8 +80,8 @@ class SystemGraph:
             dict: A dictionary where keys are agent IDs and values are lists of neighbor IDs.
         """
         return {
-            agent_id: list(self.graph.neighbors(agent_id))
-            for agent_id in self.graph.nodes()
+            agent_id: list(self.graph.neighbors(agent_id)) if agent_id in self.graph else []
+            for agent_id in self.flat_config
         }
 
     def get_layer_lengths(self):
