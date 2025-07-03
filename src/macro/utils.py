@@ -58,22 +58,18 @@ def initialize_poses(num_agents: int, radius: float, *, seed=None):
 
     Returns:
     -------
-    R_0 : np.ndarray
+    initial_positions : np.ndarray
       Initial position vectors for each agent
-    Theta : np.ndarray
+    initial_attitudes : np.ndarray
       Initial attitude vectors (Euler angles in radians)
     """
     if seed is not None:
         np.random.seed(seed)
 
-    R_0 = np.array([random_vector(radius) for _ in range(num_agents)])
-    Theta = np.array([random_vector(np.pi) for _ in range(num_agents)])
-    Theta = np.append(Theta, np.zeros((1, 3)), axis=0)
-    # Ensure Theta has shape (num_agents, 1, 3)
-    if Theta.ndim == 2:
-        Theta = Theta[:, np.newaxis, :]
+    initial_positions = np.array([random_vector(radius) for _ in range(num_agents)])
+    initial_attitudes = np.array([random_vector(np.pi) for _ in range(num_agents)])
 
-    return R_0, Theta
+    return initial_positions, initial_attitudes
 
 
 def check_intersection(ego_initial, ego_target, other_initial, other_target, tol=1e-3):
@@ -213,9 +209,9 @@ def time_to_true_anomaly(
 
 def consensus_step(
     agent_id: int,
-    history: np.ndarray,
-    desired: np.ndarray,
     neighbors: np.ndarray,
+    previous: np.ndarray,
+    desired: np.ndarray,
     gains: np.ndarray,
     timestep: float,
     count: int,
@@ -225,9 +221,9 @@ def consensus_step(
 
     Parameters:
       agent_id (int): Index of the ego agent performing the update.
-      history (np.ndarray): Time history of value vectors for each agent.
-      desired (np.ndarray): Desired value vectors for each agent.
       neighbors (np.ndarray): Indices of neighbors of the ego agent.
+      previous (np.ndarray): Previous value vectors for each agent.
+      desired (np.ndarray): Desired value vectors for each agent.
       gains (np.ndarray): Per-agent control gain vectors (one per agent).
       timestep (float): Base timestep (scalar multiplier for update magnitude).
       count (int): Current iteration (used to scale the update).
@@ -235,14 +231,12 @@ def consensus_step(
     Returns:
       np.ndarray: Updated value vector for the ego agent.
     """
-    previous = history[agent_id, -1]
-    updated = previous.copy()
-    ego_error = previous - desired[agent_id]
+    updated = previous[agent_id, :].copy()
+    ego_error = np.linalg.norm(previous[agent_id, :] - desired[agent_id, :])
 
     for neighbor_id in neighbors:
-        neighbor_error = history[neighbor_id, -1] - desired[neighbor_id]
-        delta = timestep * count * gains[neighbor_id] * (ego_error - neighbor_error)
-        updated -= delta
+        neighbor_error = np.linalg.norm(previous[neighbor_id, :] - desired[neighbor_id, :])
+        updated -= timestep * count * gains[neighbor_id] * (ego_error - neighbor_error)
 
     return updated
 

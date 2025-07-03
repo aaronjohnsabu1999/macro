@@ -117,7 +117,7 @@ def compute_desired_attitudes(
         A list of attitude vectors [roll, pitch, yaw] for each agent.
     """
     num_agents = len(flat_config)
-    desired_attitudes = [[0.0, 0.0, 0.0] for _ in range(num_agents + 1)]
+    desired_attitudes = np.zeros((num_agents + 1, 3), dtype=float)
     pitch_angles, _ = generate_paraboloid_layer_geometry(
         clear_aperture, orbital_radius, len(layer_lengths)
     )
@@ -127,14 +127,14 @@ def compute_desired_attitudes(
         true_layer, _ = to_layer_index(layer_lengths, agent_id)
 
         # Roll is 0.0 by default
-        desired_attitudes[agent_id][1] = np.pi / 2.0 - pitch_angles[true_layer]  # Pitch
-        desired_attitudes[agent_id][2] = (2.0 * np.pi * pres_pos) / layer_lengths[
+        desired_attitudes[agent_id, 1] = np.pi / 2.0 - pitch_angles[true_layer]  # Pitch
+        desired_attitudes[agent_id, 2] = (2.0 * np.pi * pres_pos) / layer_lengths[
             pres_layer
         ]  # Yaw
 
         # Normalize yaw to [-π, π]
-        if desired_attitudes[agent_id][2] > np.pi:
-            desired_attitudes[agent_id][2] -= 2.0 * np.pi
+        if desired_attitudes[agent_id, 2] > np.pi:
+            desired_attitudes[agent_id, 2] -= 2.0 * np.pi
 
     return desired_attitudes
 

@@ -55,14 +55,14 @@ class Macro:
         self.expansion = self.config["formation"]["expansion"]
 
         self.neighbors = np.zeros((self.num_agents, self.num_agents), dtype=int)
-        self.agent_params = np.full(
+        self.gains = np.full(
             (self.num_agents + 1, self.num_agents + 1, 3),
             [0.5 * 4e-6, 0.5 * 8e-6, 0.5 * 8e-6],
         )
         self.num_layers, self.layer_lengths = calc_number_of_layers(self.num_agents)
 
         self.initial_velocities = np.zeros((self.num_agents, 3))
-        self.initial_positions, self.Theta = initialize_poses(self.num_agents, 5.00)
+        self.initial_positions, self.initial_attitudes = initialize_poses(self.num_agents, 5.00)
         self.formation_positions, _ = initialize_poses(self.num_agents, 0.01)
         self.unordered_target_positions = generate_target_positions(
             self.clear_aperture,
@@ -79,6 +79,7 @@ class Macro:
             "3_ifmea": None,
         }
         self.trajectory = np.empty((self.num_agents, 0, 6))
+        self.attitudes = np.empty((self.num_agents, 0, 3))
         self.all_neighbors, self.all_flat_config = [], []
 
         self.true_mapping = [
@@ -136,7 +137,7 @@ class Macro:
         for dim, ax in enumerate(axes):
             for agent in range(self.num_agents):
                 ax.plot(
-                    self.Theta[agent, :, dim],
+                    self.attitudes[agent, :, dim],
                     label=f"Agent {agent + 1}",
                 )
             ax.set_ylabel(labels[dim])
@@ -144,7 +145,8 @@ class Macro:
             ax.grid(True, linestyle="--", alpha=0.6)
         axes[-1].set_xlabel("Time Step")
         fig.suptitle("Attitude over Time")
-        mplplt.show()
+        fig.savefig("./results/attitude_consensus.png", dpi=300)
+        mplplt.close(fig)
 
     def _simulate_phase(self, start, end, stage_name, auction_type, plot=True):
         agents = [
@@ -183,28 +185,7 @@ class Macro:
         traj = np.array(traj)
 
         self.trajectory = np.concatenate((self.trajectory, traj), axis=1)
-        self.logger.info(
-            f"Stage {stage_name} completed. Trajectory shape: {traj.shape}, "
-            f"Last system graph: {sim.get_last_system_graph()}"
-        )
-        if (
-            stage_name.lower().startswith("stage1")
-            and not self.stage_changes["1_rendezvous"]
-        ):
-            self.stage_changes["1_rendezvous"] = 0
-        if (
-            stage_name.lower().startswith("stage2")
-            and not self.stage_changes["2_rendezvous"]
-        ):
-            self.stage_changes["2_formation"] = (
-                self.trajectory.shape[1] - self.num_frames
-            )
-        elif (
-            stage_name.lower().startswith("stage3")
-            and not self.stage_changes["2_formation"]
-        ):
-            self.stage_changes["3_ifmea"] = self.trajectory.shape[1] - self.num_frames
-
+        
         if plot:
             self._plot_trajectory(f"./results/{stage_name}.html", stage_name)
         return sim.get_last_system_graph()
@@ -233,7 +214,7 @@ class Macro:
             )
 
         def apply_exchange(index_triplet):
-            agents = [to_flat_index(self.layer_lengths, idx) for idx in index_triplet]
+            agents = [to_flat_index(self.layer_lengths, idx[0], idx[1]) for idx in index_triplet]
             (
                 self.flat_config[agents[0]],
                 self.flat_config[agents[1]],
@@ -243,7 +224,7 @@ class Macro:
         intermediate_ifmea_positions = self.formation_positions.copy()
         target_positions = self.formation_positions.copy()
 
-        self.ifmea_engine.set_layer_config(self.true_mapping)
+        self.ifmea_engine.set_layer_config(self.pre_ifmea_config)
         commands = self.ifmea_engine.run()
 
         for command in commands:
@@ -275,45 +256,67 @@ class Macro:
         return self.all_neighbors, self.all_flat_config
 
     def _attitude_consensus(self):
-        for k in range(len(self.all_neighbors)):
-            theta_desired = compute_desired_attitudes(
-                self.clear_aperture,
-                self.parab_radius,
-                self.layer_lengths,
-                self.all_flat_config[k],
-            )
-            neighbors = self.all_neighbors[k]
-            for frame in range(self.num_frames):
-                theta = np.empty((self.num_agents, 1, 3), dtype=float)
-                for agent_id in range(self.num_agents):
-                    theta[agent_id, 0] = consensus_step(
-                        agent_id=agent_id,
-                        history=self.Theta,
-                        desired=theta_desired,
-                        neighbors=neighbors[agent_id],
-                        gains=self.agent_params[agent_id],
-                        timestep=self.timestep,
-                        count=frame,
-                    )
-                self.Theta = np.concatenate((self.Theta, theta), axis=1)
+        num_steps = self.trajectory.shape[1] - self.stage_changes["3_ifmea"]
+        self.attitudes = np.zeros((self.num_agents, num_steps, 3), dtype=float)
+
+        # Initialize all agents at t=0 with their initial attitudes
+        self.attitudes[:, 0, :] = self.initial_attitudes
+
+        # Compute the target/desired attitude
+        desired_attitudes = compute_desired_attitudes(
+            self.clear_aperture,
+            self.parab_radius,
+            self.layer_lengths,
+            self.flat_config,
+        )
+
+        # Run consensus over each time step
+        for frame in range(num_steps - 1):
+            for agent_id in range(self.num_agents):
+                self.attitudes[agent_id, frame + 1, :] = consensus_step(
+                    agent_id=agent_id,
+                    neighbors=self.all_neighbors[-1].get(agent_id, []),
+                    previous=self.attitudes[:, frame, :],
+                    desired=desired_attitudes,
+                    gains=self.gains[agent_id],
+                    timestep=self.timestep,
+                    count=frame,
+                )
+        
         self._plot_attitude()
 
     def run(self):
+        self.stage_changes["1_rendezvous"] = 0
         self._simulate_phase(
             start=self.initial_positions,
             end=self.formation_positions,
             stage_name="1_rendezvous",
             auction_type="Hybrid",
         )
+        self.logger.info(
+            f"Rendezvous completed. Trajectory shape: {self.trajectory.shape}"
+        )
+
+        self.stage_changes["2_formation"] = self.trajectory.shape[1] - 1
         self._simulate_phase(
             start=self.formation_positions,
             end=self.unordered_target_positions,
             stage_name="2_formation",
             auction_type="Hybrid",
         )
+        self.logger.info(
+            f"Formation completed. Trajectory shape: {self.trajectory.shape}"
+        )
+        
+        self.stage_changes["3_ifmea"] = self.trajectory.shape[1] - 1
         self._generate_ifmea_config()
         self._intra_formation_exchange()
+        self.logger.info(
+            f"IFMEA completed. Trajectory shape: {self.trajectory.shape}"
+        )
+
         self._attitude_consensus()
+        self.logger.info("Attitude consensus completed.")
 
 
 if __name__ == "__main__":

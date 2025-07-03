@@ -11,45 +11,45 @@
 
 import copy
 import numpy as np
+import plotly.offline as ptyplt
+import plotly.graph_objects as go
 
-from macro.simulate import simulatePL
-from macro.glideslope import GlideslopeSimulation
+from macro.glideslope import GlideslopeSimulator
 from macro.agent import Agent, OrbitalParams, SimulationParams
 from macro.utils import load_config
 
 
 class BenchmarkRunner:
-    def __init__(self, num_agents=18, num_jumps=5):
+    def __init__(self, num_agents=18, num_jumps=5, auction_type="Hybrid"):
         self.num_agents = num_agents
         self.num_jumps = num_jumps
         self.config = load_config()
         self.orbit = self._compute_orbital_params()
-        self.sim_params = self._create_simulation_params()
-        self.R_0 = self._get_initial_positions()
-        self.R_f = self._generate_target_positions()
+        self.sim_params = self._create_simulation_params(auction_type)
+        self.initial_positions = self._get_initial_positions()
+        self.target_positions = self._generate_target_positions()
+        self.neighbor_radius = self.config["formation"]["neighbor_radius"]
         self.neighbors = self._init_neighbor_matrix()
 
     def _compute_orbital_params(self):
         return OrbitalParams(
             radius=self.config["orbit"]["radius"],
-            gravpar=self.config["orbit"]["gravpar"],
             eccentricity=self.config["orbit"]["eccentricity"],
-            ang_vel=np.sqrt(
+            angular_velocity=np.sqrt(
                 self.config["orbit"]["gravpar"] / self.config["orbit"]["radius"] ** 3
             ),
-            ang_mom=(self.config["orbit"]["radius"] ** 2)
+            angular_momentum=(self.config["orbit"]["radius"] ** 2)
             * np.sqrt(
                 self.config["orbit"]["gravpar"] / self.config["orbit"]["radius"] ** 3
             ),
         )
 
-    def _create_simulation_params(self):
+    def _create_simulation_params(self, auction_type):
         return SimulationParams(
             num_jumps=self.num_jumps,
             timestep=self.config["simulation"]["timestep"],
             num_frames=self.config["simulation"]["num_frames"],
-            auction_type=self.config["simulation"]["auction_type"],
-            use_config=self.config["simulation"]["use_config"],
+            auction_type=auction_type,
             layer_config=[[1, 2, 1, 1, 1, 2], [2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2]],
             flat_config=[i for i in range(self.num_agents)],
         )
@@ -181,26 +181,42 @@ class BenchmarkRunner:
         for i in range(self.num_agents):
             for j in range(self.num_agents):
                 if i != j:
-                    dist = np.linalg.norm(self.R_0[i] - self.R_0[j])
-                    if dist < self.sim_params.neighbor_radius:
+                    dist = np.linalg.norm(self.initial_positions[i] - self.initial_positions[j])
+                    if dist < self.neighbor_radius:
                         neighbors[i][j] = 1
         return neighbors
 
+    def _simulate(self, title, traj, labels):
+        markers = []
+        for agent in range(traj.shape[0]):
+            markers.append(
+                go.Scatter3d(
+                    mode="markers",
+                    x=traj[agent, :, 0],
+                    y=traj[agent, :, 1],
+                    z=traj[agent, :, 2],
+                    marker=dict(size=3),
+                    name=labels[agent],
+                )
+            )
+        fig = go.Figure(data=markers)
+        ptyplt.plot(fig, filename=title, auto_open=False)
+
     def run(self, auction_types):
-        simulation = GlideslopeSimulation(
+        simulation = GlideslopeSimulator(
             agents=[
                 Agent(
                     agent_id=i,
                     agent_type=1,
-                    position=self.R_0[i],
+                    position=self.initial_positions[i],
                     velocity=np.zeros(3),
-                    target=self.R_f[i],
+                    target=self.target_positions[i],
                 )
                 for i in range(self.num_agents)
             ],
-            neighbors_matrix=self.neighbors,
-            neighbor_radius=self.config["simulation"]["neighbor_radius"],
-            target_positions=self.R_f,
+            neighbor_matrix=self.neighbors,
+            neighbor_radius=self.neighbor_radius,
+            target_positions=self.target_positions,
             orbit=self.orbit,
             sim=self.sim_params,
         )
@@ -208,10 +224,13 @@ class BenchmarkRunner:
             self.sim_params.auction_type = auction_type
             simulation.set_simulation_params(self.sim_params)
             traj, deltav, energy, neighbor_data = simulation.run()
-            simulatePL(
-                f"benchmark-{auction_type}.html",
-                traj[:, :, 0],
-                traj[:, :, 1],
-                traj[:, :, 2],
+            self._simulate(
+                f"./results/benchmark-{auction_type.lower()}.html",
+                traj,
                 [f"Spacecraft {i}" for i in range(self.num_agents)],
             )
+
+if __name__ == "__main__":
+    benchmark = BenchmarkRunner(num_agents=18, num_jumps=5)
+    auction_types = ["Hybrid", "Distributed", "Consensus", "Greedy"]
+    benchmark.run(auction_types)
