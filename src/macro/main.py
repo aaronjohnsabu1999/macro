@@ -67,12 +67,10 @@ class Macro:
         self.R_0, self.Theta = init_pose(self.num_agents, 5.00)
         self.R_I, _ = init_pose(self.num_agents, 0.01)
 
+        self.true_mapping = [np.full(l, i + 1) for i, l in enumerate(self.layer_lens)]
         self.flat_config = np.arange(self.num_agents)
-        self.true_mapping = np.concatenate(
-            [np.full(l, i + 1) for i, l in enumerate(self.layer_lens)]
-        )
 
-    def _simulate_phase(self, start, end, stage_name, auction_type, use_config=False):
+    def _simulate_phase(self, start, end, stage_name, auction_type):
         agents = [
             Agent(
                 agent_id=i,
@@ -94,7 +92,6 @@ class Macro:
             timestep=self.timestep,
             num_frames=self.num_frames,
             auction_type=auction_type,
-            use_config=use_config,
             layer_config=self.true_mapping,
             flat_config=self.flat_config,
         )
@@ -106,15 +103,14 @@ class Macro:
             orbit=orbit_params,
             sim=sim_params,
         )
-        traj, *_ = sim.run()
-        traj = np.array(list(traj.values()))  # ensure NumPy array conversion
+        traj, _, _, _ = sim.run()
+        traj = np.array(traj)
         self._plot(f"{stage_name}.html", traj[:, :, 0], traj[:, :, 1], traj[:, :, 2])
         return (
             traj[:, :, 0],
             traj[:, :, 1],
             traj[:, :, 2],
-            sim.NeighborsDistanceOT,
-            sim.NeighborsConfigOT,
+            sim.get_last_system_graph(),
         )
 
     def _plot(self, title, X, Y, Z):
@@ -198,14 +194,13 @@ class Macro:
                 for idx, agent in enumerate(self.flat_config):
                     self.R_f[agent] = self.R_f0[idx]
 
-                X, Y, Z, _, out = self._simulate_phase(
+                X, Y, Z, system_graph = self._simulate_phase(
                     start=R_0,
                     end=self.R_f,
                     stage_name="Stage-02",
                     auction_type=None,
-                    use_config=True,
                 )
-                all_neighbors.append(out[1])
+                all_neighbors.append(system_graph.get_all_neighbors())
                 R_0 = self.R_f
                 for i in range(self.num_agents):
                     traj[i, 0].extend(X[i])
@@ -223,7 +218,7 @@ class Macro:
                 self.layer_lens,
                 all_flat_config[k],
             )
-            neighbors = all_neighbors[k][0][1]  # assuming consistent structure
+            neighbors = all_neighbors[k]
             for i in range(self.num_frames):
                 Theta_copy = self.Theta.copy()
                 for agent_id in range(self.num_agents):
@@ -244,7 +239,7 @@ class Macro:
         _, _, _, _ = self._simulate_phase(
             start=self.R_0, end=self.R_I, stage_name="Stage-01A", auction_type="Hybrid"
         )
-        X, Y, Z, _, _ = self._simulate_phase(
+        X, Y, Z, _ = self._simulate_phase(
             start=self.R_I,
             end=self.R_f,
             stage_name="Stage-01B",

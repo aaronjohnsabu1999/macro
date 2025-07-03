@@ -73,7 +73,55 @@ def init_pose(num_agents, radius, *, seed=None):
     return R_0, Theta
 
 
-def gen_cost(ego_location, target_locations, min_value=True, func="euclidean"):
+def check_intersection(ego_initial, ego_target, other_initial, other_target, tol=1e-3):
+    """
+    Check if the trajectory of the ego agent intersects with another agent's trajectory in 3D space.
+
+    Parameters
+    ----------
+    ego_initial : np.ndarray
+        Initial position of the ego agent.
+    ego_target : np.ndarray
+        Target position of the ego agent.
+    other_initial : np.ndarray
+        Initial position of the other agent.
+    other_target : np.ndarray
+        Target position of the other agent.
+    tol : float, optional
+        Tolerance for considering an intersection (default is 1e-3).
+
+    Returns
+    -------
+    bool
+        True if the line segments intersect (within `tol`), False otherwise.
+    """
+    dir_e = ego_target - ego_initial
+    dir_o = other_target - other_initial
+    sep = ego_initial - other_initial
+
+    dot_ee = np.dot(dir_e, dir_e)
+    dot_eo = np.dot(dir_e, dir_o)
+    dot_oo = np.dot(dir_o, dir_o)
+    dot_es = np.dot(dir_e, sep)
+    dot_os = np.dot(dir_o, sep)
+
+    denom = dot_ee * dot_oo - dot_eo * dot_eo
+    if abs(denom) < 1e-8:
+        return False  # Segments are nearly parallel
+
+    param_a = (dot_eo * dot_os - dot_oo * dot_es) / denom
+    param_b = (dot_ee * dot_os - dot_eo * dot_es) / denom
+
+    if not (0 <= param_a <= 1 and 0 <= param_b <= 1):
+        return False  # Closest points are outside the segments
+
+    closest_point_e = ego_initial + param_a * dir_e
+    closest_point_o = other_initial + param_b * dir_o
+
+    return np.linalg.norm(closest_point_e - closest_point_o) < tol
+
+
+def generate_cost(ego_location, target_locations, min_value=True, func="euclidean"):
     """
     Generate cost based on Euclidean distance between an agent and all target positions.
 

@@ -21,9 +21,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger = logging.getLogger("macro")
-    logger.setLevel(logging.INFO)
     handler = logging.StreamHandler()
-    handler.setLevel(logging.INFO)
+    handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(name)s [%(levelname)s] %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
