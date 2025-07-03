@@ -109,7 +109,7 @@ class GlideslopeSimulator:
                         angular_velocity=self.angular_velocity,
                     )
                     idx = jump * self.steps_per_jump + step
-                    self.trajectory[agent.agent_id][idx] = np.concatenate((r_t, v_t))
+                    self.trajectory[agent.agent_id, idx] = np.concatenate((r_t, v_t))
                 agent.position = r_t
                 agent.velocity = v_t
 

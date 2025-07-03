@@ -69,6 +69,9 @@ def initialize_poses(num_agents: int, radius: float, *, seed=None):
     R_0 = np.array([random_vector(radius) for _ in range(num_agents)])
     Theta = np.array([random_vector(np.pi) for _ in range(num_agents)])
     Theta = np.append(Theta, np.zeros((1, 3)), axis=0)
+    # Ensure Theta has shape (num_agents, 1, 3)
+    if Theta.ndim == 2:
+        Theta = Theta[:, np.newaxis, :]
 
     return R_0, Theta
 

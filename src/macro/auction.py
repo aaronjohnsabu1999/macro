@@ -356,9 +356,6 @@ if __name__ == "__main__":
     logger.info("Original target positions:\n%s", target_positions)
     # Run all auctions for demo
     for name, AuctionClass in auction_map.items():
-        if name is not "Distributed":
-            # Skip DistributedAuction for this demo
-            continue
         logger.info(f"Running {name} auction")
         auction = AuctionClass(
             initial_positions.copy(), target_positions.copy(), graph, logger=logger

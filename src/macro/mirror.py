@@ -44,7 +44,11 @@ def calc_number_of_layers(num_agents):
 
 
 def generate_target_positions(
-    clear_aperture: float, orbital_radius: float, num_agents: int, layer_lengths: list[int], expansion: float
+    clear_aperture: float,
+    orbital_radius: float,
+    num_agents: int,
+    layer_lengths: list[int],
+    expansion: float,
 ):
     """
     Generate 3D target positions for agents arranged in concentric circular layers.

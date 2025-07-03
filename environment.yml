@@ -8,17 +8,18 @@ dependencies:
   - black
   - numpy
   - scipy
-  - matplotlib
   - plotly
   - pyyaml
+  - networkx
+  - matplotlib
   - pip
 
   # Optional: editor/dev tools
+  - pytest
   - ipython
   - mypy
   - ruff
-  - pytest
-
+  
   # Pip install from pyproject.toml
   - pip:
       - -e . # Install the package in editable mode
