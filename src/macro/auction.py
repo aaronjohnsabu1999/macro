@@ -146,7 +146,7 @@ class DistributedAuction(Auction):
                 for pos in self.initial_positions
             ]
         )  # Utility matrix: utility_matrix[agent, task]
-        curr_assignment = np.zeros(
+        curr_assignment = np.arange(
             self.num_agents, dtype=int
         )  # Each agent's current task choice
         prices = np.zeros(
@@ -356,6 +356,9 @@ if __name__ == "__main__":
     logger.info("Original target positions:\n%s", target_positions)
     # Run all auctions for demo
     for name, AuctionClass in auction_map.items():
+        if name is not "Distributed":
+            # Skip DistributedAuction for this demo
+            continue
         logger.info(f"Running {name} auction")
         auction = AuctionClass(
             initial_positions.copy(), target_positions.copy(), graph, logger=logger

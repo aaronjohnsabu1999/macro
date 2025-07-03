@@ -79,6 +79,10 @@ class GlideslopeSimulator:
             if self.auction_type:
                 if self.auction_type not in auction_map:
                     raise ValueError(f"Unknown auction type: {self.auction_type}")
+                if isinstance(self.target_positions, list):
+                    raise ValueError(
+                        "target_positions should be a numpy array, not a list."
+                    )
                 self.target_positions = auction_map[self.auction_type](
                     initial_positions=np.array([a.position for a in self.agents]),
                     target_positions=self.target_positions,

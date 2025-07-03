@@ -15,7 +15,7 @@ import numpy as np
 from macro.simulate import simulatePL
 from macro.glideslope import GlideslopeSimulation
 from macro.agent import Agent, OrbitalParams, SimulationParams
-from macro.utils import init_pose, load_config
+from macro.utils import load_config
 
 
 class BenchmarkRunner:

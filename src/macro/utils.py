@@ -43,7 +43,7 @@ def random_vector(scale=1.0):
     return scale * np.array([random_sign() * np.random.rand() for _ in range(3)])
 
 
-def init_pose(num_agents, radius, *, seed=None):
+def initialize_poses(num_agents: int, radius: float, *, seed=None):
     """
     Generate random initial positions and attitudes for spacecraft agents.
 
@@ -58,17 +58,17 @@ def init_pose(num_agents, radius, *, seed=None):
 
     Returns:
     -------
-    R_0 : list of np.ndarray
+    R_0 : np.ndarray
       Initial position vectors for each agent
-    Theta : list of np.ndarray
+    Theta : np.ndarray
       Initial attitude vectors (Euler angles in radians)
     """
     if seed is not None:
         np.random.seed(seed)
 
-    R_0 = [random_vector(radius) for _ in range(num_agents)]
-    Theta = [random_vector(np.pi) for _ in range(num_agents)]
-    Theta.append(np.zeros(3))
+    R_0 = np.array([random_vector(radius) for _ in range(num_agents)])
+    Theta = np.array([random_vector(np.pi) for _ in range(num_agents)])
+    Theta = np.append(Theta, np.zeros((1, 3)), axis=0)
 
     return R_0, Theta
 

@@ -17,7 +17,7 @@ from macro.mirror import (
     calc_number_of_layers,
     compute_desired_attitudes,
 )
-from macro.utils import init_pose, consensus_step, to_layer_index, NullLogger
+from macro.utils import initialize_poses, consensus_step, to_layer_index, NullLogger
 from macro.agent import Agent, OrbitalParams, SimulationParams
 from macro.glideslope import GlideslopeSimulator
 
@@ -64,10 +64,10 @@ class Macro:
         )
         self.R_f = self.R_f0.copy()
         self.V_0 = np.zeros((self.num_agents, 3))
-        self.R_0, self.Theta = init_pose(self.num_agents, 5.00)
-        self.R_I, _ = init_pose(self.num_agents, 0.01)
+        self.R_0, self.Theta = initialize_poses(self.num_agents, 5.00)
+        self.R_I, _ = initialize_poses(self.num_agents, 0.01)
 
-        self.true_mapping = [np.full(l, i + 1) for i, l in enumerate(self.layer_lens)]
+        self.true_mapping = [list(np.full(l, i + 1)) for i, l in enumerate(self.layer_lens)]
         self.flat_config = np.arange(self.num_agents)
 
     def _simulate_phase(self, start, end, stage_name, auction_type):
@@ -165,7 +165,7 @@ class Macro:
                 traj[agent, dim] = []
         all_neighbors, all_flat_config = [], []
         R_0 = self.R_f
-        self.ifmea_engine.set_layer_config(self.layer_config)
+        self.ifmea_engine.set_layer_config(self.true_mapping)
         commands = self.ifmea_engine.run()
 
         for command in commands:
@@ -252,7 +252,7 @@ class Macro:
             idx, _ = to_layer_index(
                 self.layer_lens, np.argmin(np.linalg.norm(self.R_f - r_0, axis=1))
             )
-            present[idx].append(self.true_mapping[agent])
+            present[idx].append(self.flat_config[agent])
 
         all_neighbors, all_flat_config = self._intra_formation_exchange(present)
         self._attitude_consensus(all_neighbors, all_flat_config)
