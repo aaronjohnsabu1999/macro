@@ -9,21 +9,14 @@
 # *                                                         *
 # ***********************************************************/
 
+import copy
 import logging
 import numpy as np
 from abc import ABC, abstractmethod
 from scipy.optimize import linear_sum_assignment
 
-from macro.utils import gen_cost, NullLogger
-
-
-auction_map = {
-    "Standard": "StandardAuction",
-    "Hybrid": "HybridAuction",
-    "Distributed": "DistributedAuction",
-    "Consensus": "ConsensusAuction",
-    "Greedy": "GreedyAuction",
-}
+from macro.graph import SystemGraph
+from macro.utils import generate_cost, NullLogger, check_intersection
 
 
 class Auction(ABC):
@@ -31,19 +24,25 @@ class Auction(ABC):
     Abstract base class for auction-based task allocation algorithms.
 
     Attributes:
-        R_0 (np.ndarray): Initial positions of agents.
-        R_f (np.ndarray): Target positions to assign.
-        G (np.ndarray): Adjacency matrix indicating communication graph.
+        initial_positions (np.ndarray): Initial positions of agents.
+        target_positions (np.ndarray): Target positions to assign.
+        graph (np.ndarray): Adjacency matrix indicating communication graph.
         num_agents (int): Number of agents.
     """
 
-    def __init__(self, R_0, R_f, G, *args, **kwargs):
-        self.R_0 = R_0
-        self.R_f = R_f
-        self.G = G
-        self.num_agents = len(R_0)
+    def __init__(
+        self,
+        initial_positions: np.ndarray,
+        target_positions: np.ndarray,
+        graph: SystemGraph,
+        *args,
+        **kwargs,
+    ):
+        self.initial_positions = initial_positions
+        self.target_positions = target_positions
+        self.graph = graph
+        self.num_agents = initial_positions.shape[0]
         self.logger = kwargs.get("logger", NullLogger())
-        self.logger.debug("Auction initialized with %d agents", self.num_agents)
 
     @abstractmethod
     def assign(self):
@@ -54,7 +53,7 @@ class Auction(ABC):
         Returns:
             np.ndarray: New target positions after assignment.
         """
-        pass
+        return self.target_positions
 
 
 class StandardAuction(Auction):
@@ -69,55 +68,34 @@ class StandardAuction(Auction):
         Returns:
             np.ndarray: Updated target assignments.
         """
-        self.logger.debug("Starting standard auction assignment")
         for ego in range(self.num_agents):
-            neighbors = [i for i in range(self.num_agents) if self.G[ego][i] > 0]
-            R_fn = [self.R_f[i] for i in neighbors]
-            R_0n = [self.R_0[i] for i in neighbors]
-            cost_matrix = [gen_cost(r_0, R_fn) for r_0 in R_0n]
-            _, col_ind = linear_sum_assignment(cost_matrix)
-            for idx, agent in enumerate(neighbors):
-                self.R_f[agent] = R_fn[col_ind[idx]]
-        return self.R_f
+            neighbors = self.graph.get_neighbors(ego)
+            if not neighbors:
+                continue
+            neighbors_initial_positions = self.initial_positions[neighbors]
+            neighbors_target_positions = self.target_positions[neighbors]
+            cost_matrix = np.stack(
+                [
+                    generate_cost(pos, neighbors_target_positions)
+                    for pos in neighbors_initial_positions
+                ]
+            )
+            if cost_matrix.size == 0:
+                self.logger.debug(f"No neighbors for agent {ego}, skipping assignment")
+                continue
+            self.logger.debug(
+                f"Agent {ego} neighbors: {neighbors}, cost matrix:\n{cost_matrix}"
+            )
+            row, col = linear_sum_assignment(cost_matrix)
+            for c_idx, neighbor in zip(col, self.graph.get_neighbors(ego)):
+                self.target_positions[neighbor] = neighbors_target_positions[c_idx]
+        return self.target_positions
 
 
 class GreedyAuction(Auction):
     """
     Implements a greedy resolution of path conflicts by locally swapping assignments.
     """
-
-    def _check_intersections(self, ego):
-        """
-        Checks for 3D line intersection between ego's path and its neighbors'.
-
-        Args:
-            ego (int): Index of the ego agent.
-
-        Returns:
-            tuple[bool, list[int]]: Whether intersection exists, and list of colliding agents.
-        """
-        self.logger.debug("Checking intersections for agent %d", ego)
-        r_0, r_f = self.R_0[ego], self.R_f[ego]
-        intersecting = []
-        for i, (r_0n, r_fn) in enumerate(zip(self.R_0, self.R_f)):
-            if self.G[ego][i] and i != ego:
-                A = [
-                    [r_0[0] - r_f[0], -(r_0n[0] - r_fn[0])],
-                    [r_0[1] - r_f[1], -(r_0n[1] - r_fn[1])],
-                ]
-                B = [r_f[0] - r_fn[0], r_f[1] - r_fn[1]]
-                try:
-                    t, s = np.linalg.solve(A, B)
-                    dz = abs(
-                        (r_0[2] - r_f[2]) * t
-                        - (r_0n[2] - r_fn[2]) * s
-                        - (r_f[2] - r_fn[2])
-                    )
-                    if dz < 1e-3:
-                        intersecting.append(i)
-                except np.linalg.LinAlgError:
-                    continue
-        return bool(intersecting), intersecting
 
     def assign(self):
         """
@@ -126,20 +104,25 @@ class GreedyAuction(Auction):
         Returns:
             np.ndarray: Updated target assignments.
         """
-        self.logger.debug("Starting greedy auction assignment")
         while True:
-            changes = False
+            swaps = []
             for ego in range(self.num_agents):
-                intersects, neighbors = self._check_intersections(ego)
-                if intersects:
-                    for other in neighbors:
-                        self.R_f[ego], self.R_f[other] = self.R_f[other], self.R_f[ego]
-                        if not self._check_intersections(ego)[0]:
-                            changes = True
-                            break
-            if not changes:
+                for other in self.graph.get_neighbors(ego):
+                    if ego < other and check_intersection(
+                        self.initial_positions[ego],
+                        self.target_positions[ego],
+                        self.initial_positions[other],
+                        self.target_positions[other],
+                    ):
+                        swaps.append((ego, other))
+            if not swaps:
+                self.logger.debug("No intersections found, assignment complete")
                 break
-        return self.R_f
+            for ego, other in swaps:
+                self.target_positions[ego, other] = self.target_positions[other, ego]
+                self.initial_positions[ego, other] = self.initial_positions[other, ego]
+
+        return self.target_positions
 
 
 class DistributedAuction(Auction):
@@ -154,50 +137,69 @@ class DistributedAuction(Auction):
         Returns:
             np.ndarray: Final assigned targets after convergence.
         """
-        self.logger.debug("Starting distributed auction assignment")
-        if not self.G.is_connected():
-            return self.R_f
+        if not self.graph.is_connected():
+            return self.target_positions
 
-        beta = [gen_cost(r_0, self.R_f, False) for r_0 in self.R_0]
-        a = np.zeros(self.num_agents, dtype=int)
-        p = np.zeros((self.num_agents, self.num_agents))
-        b = np.zeros_like(p)
+        utility_matrix = np.stack(
+            [
+                generate_cost(pos, self.target_positions, False)
+                for pos in self.initial_positions
+            ]
+        )  # Utility matrix: utility_matrix[agent, task]
+        curr_assignment = np.arange(
+            self.num_agents, dtype=int
+        )  # Each agent's current task choice
+        prices = np.zeros(
+            (self.num_agents, self.num_agents)
+        )  # Price matrix: price_matrix[agent, task]
+        bids = np.zeros_like(
+            prices
+        )  # Bids matrix: bids[agent, task] = agent ID if agent bids on task
 
-        while len(a) != len(set(a)):
-            a_next = np.copy(a)
+        while True:
+            next_assignment = curr_assignment.copy()
             for ego in range(self.num_agents):
-                p_max = np.max(
-                    [p[k] for k in range(self.num_agents) if self.G[ego][k]], axis=0
-                )
-                b_max = np.max(
-                    [
-                        b[k] * (p[k] == p_max)
-                        for k in range(self.num_agents)
-                        if self.G[ego][k]
-                    ],
-                    axis=0,
-                )
+                neighbors = self.graph.get_neighbors(ego)
+                if not neighbors:
+                    continue
+                # Highest known prices among neighbors
+                max_price = np.max(prices[neighbors], axis=0)
+                # Resolve ties: among neighbors whose price equals max, get their IDs
+                neighbor_bids = bids[neighbors] * (prices[neighbors] == max_price)
+                max_bids = np.max(neighbor_bids, axis=0)
 
-                if p[ego][a[ego]] <= p_max[a[ego]] and b_max[a[ego]] != ego:
-                    scores = [beta[ego][j] - p_max[j] for j in range(self.num_agents)]
-                    a_next[ego] = np.argmax(scores)
-                    b[ego][a_next[ego]] = ego
-                    v = max(scores)
-                    w = max(score for j, score in enumerate(scores) if j != a_next[ego])
-                    gamma = v - w + np.random.rand() * 0.05
-                    p[ego][a_next[ego]] += gamma
-                else:
-                    a_next[ego] = a[ego]
-            if np.array_equal(a, a_next):
+                # If the neighbor bid invalidates our current assignment, consider rebidding
+                if (
+                    prices[ego, curr_assignment[ego]] <= max_price[curr_assignment[ego]]
+                    and max_bids[curr_assignment[ego]] != ego
+                ):
+                    # Evaluate net utilities
+                    net_utilities = utility_matrix[ego] - max_price
+                    best_task = np.argmax(net_utilities)
+                    next_assignment[ego] = best_task
+                    bids[ego, best_task] = ego
+
+                    # Price increment based on difference between first and second best utilities
+                    highest_gain = net_utilities[best_task]
+                    alt_utilities = np.delete(net_utilities, best_task)
+                    second_gain = (
+                        np.max(alt_utilities) if alt_utilities.size > 0 else 0.0
+                    )
+                    price_increment = (
+                        highest_gain - second_gain + np.random.rand() * 0.05
+                    )
+                    prices[ego, best_task] += price_increment
+            if np.array_equal(curr_assignment, next_assignment):
                 break
-            a = a_next
-        return [self.R_f[i] for i in a]
+            curr_assignment = next_assignment
+        # Update target positions according to converged assignment
+        self.target_positions = self.target_positions[curr_assignment]
+        return self.target_positions
 
 
-# 'Consensus-Based Decentralized Auctions for Robust Task Allocation' - Choi, Brunet, How
 class ConsensusAuction(Auction):
     """
-    Implements the consensus-based decentralized auction by Choi, Brunet, and How.
+    Implements the single-assignment Consensus-Based Auction Algorithm (CBAA) from Choi, Brunet & How (2009), with a bidding phase followed by local consensus.
     """
 
     def assign(self):
@@ -207,49 +209,82 @@ class ConsensusAuction(Auction):
         Returns:
             np.ndarray: Final target assignments after consensus.
         """
-        self.logger.debug("Starting consensus auction assignment")
-        if not self.G.is_connected():
-            return self.R_f
+        if not self.graph.is_connected():
+            return self.target_positions
 
-        c = [gen_cost(r_0, self.R_f) for r_0 in self.R_0]
-        x, y, z = (
-            np.zeros((self.num_agents, self.num_agents)),
-            np.zeros_like(x),
-            np.zeros_like(x),
+        # Bid utility matrix: bid_utility[i][j] is cost for agent i to task j
+        bid_utility = np.stack(
+            [
+                generate_cost(pos, self.target_positions)
+                for pos in self.initial_positions
+            ]
         )
-        J = [0] * self.num_agents
 
-        def select_task(ego):
-            """
-            Internal subroutine for ego agent to select the next best task.
-            """
-            if np.sum(x[ego]) == 0:
-                h = c[ego] >= y[ego]
-                if np.any(h):
-                    J[ego] = np.argmax(h * c[ego])
-                    x[ego][J[ego]] = 1
-                    y[ego][J[ego]] = c[ego][J[ego]]
+        # bid_flag[i][j] = 1 if agent i currently holds best bid on task j
+        # bid_price[i][j] = currently known highest bid price for task j by i
+        # bid_winner[i][j] = agent ID believed by i to be winning task j
+        bid_flag = np.zeros((self.num_agents, self.num_agents), dtype=int)
+        bid_price = np.zeros((self.num_agents, self.num_agents), dtype=float)
+        bid_winner = np.full((self.num_agents, self.num_agents), -1, dtype=int)
 
-        def update_task(ego):
-            """
-            Internal subroutine to update ego's perception of task ownership.
-            """
-            for j in range(self.num_agents):
-                y[ego][j] = max(
-                    y[k][j] for k in range(self.num_agents) if self.G[ego][k]
-                )
-            z[ego][J[ego]] = np.argmax(
-                [y[k][J[ego]] for k in range(self.num_agents) if self.G[ego][k]]
-            )
-            if z[ego][J[ego]] != ego:
-                x[ego][J[ego]] = 0
+        # Single task assignment per agent
+        assignment = np.full(self.num_agents, -1, dtype=int)
 
-        while not all(np.any(xi) for xi in x):
-            for ego in range(self.num_agents):
-                select_task(ego)
-            for ego in range(self.num_agents):
-                update_task(ego)
-        return self.R_f
+        def auction_phase(agent):
+            # If agent already holds a bid, do nothing
+            if assignment[agent] >= 0:
+                return
+
+            utilities = bid_utility[agent]
+            known_prices = bid_price[agent]
+            feasible = utilities > known_prices
+            if not np.any(feasible):
+                return
+
+            best_task = np.argmax(np.where(feasible, utilities, -np.inf))
+            assignment[agent] = best_task
+            bid_flag[agent, best_task] = 1
+            bid_price[agent, best_task] = utilities[best_task]
+            bid_winner[agent, best_task] = agent
+
+        def consensus_phase(agent):
+            for task in range(self.num_agents):
+                # share max known bid price among neighbors
+                neighbor_prices = [
+                    bid_price[n, task] for n in self.graph.get_neighbors(agent)
+                ]
+                if neighbor_prices:
+                    bid_price[agent, task] = max(
+                        bid_price[agent, task], max(neighbor_prices)
+                    )
+                    # update winner to agent with max price
+                    winners = [
+                        (n, bid_price[n, task]) for n in self.graph.get_neighbors(agent)
+                    ]
+                    winners.append((agent, bid_price[agent, task]))
+                    bid_winner[agent, task] = max(winners, key=lambda x: x[1])[0]
+
+                # if agent lost the task it thought it held, revoke
+                if assignment[agent] == task and bid_winner[agent, task] != agent:
+                    assignment[agent] = -1
+                    bid_flag[agent, task] = 0
+
+        # Main loop: alternate auction + consensus until stable
+        while True:
+            old_assignment = assignment.copy()
+            for agent in range(self.num_agents):
+                auction_phase(agent)
+            for agent in range(self.num_agents):
+                consensus_phase(agent)
+            if np.array_equal(assignment, old_assignment):
+                break
+
+        # apply assignments
+        for i, task in enumerate(assignment):
+            if task >= 0:
+                self.target_positions[i] = self.target_positions[task]
+
+        return self.target_positions
 
 
 class HybridAuction(Auction):
@@ -266,28 +301,64 @@ class HybridAuction(Auction):
         Returns:
             np.ndarray: Final target assignments.
         """
-        self.logger.debug("Starting hybrid auction assignment")
-        if not self.G.is_connected():
+        if not self.graph.is_connected():
             self.logger.debug("Graph is not connected, using greedy auction")
-            return GreedyAuction(self.R_0, self.R_f, self.G).assign()
+            return GreedyAuction(
+                self.initial_positions, self.target_positions, self.graph
+            ).assign()
         else:
             self.logger.debug("Graph is connected, using distributed auction")
-            return DistributedAuction(self.R_0, self.R_f, self.G).assign()
+            return DistributedAuction(
+                self.initial_positions, self.target_positions, self.graph
+            ).assign()
+
+
+auction_map = {
+    "Standard": StandardAuction,
+    "Distributed": DistributedAuction,
+    "Consensus": ConsensusAuction,
+    "Greedy": GreedyAuction,
+    "Hybrid": HybridAuction,
+}
 
 
 if __name__ == "__main__":
-    R_0 = np.array([[0, 0, 0], [1, 1, 0], [2, 2, 0]])  # Initial positions
-    R_f = np.array([[3, 3, 0], [4, 4, 0], [5, 5, 0]])  # Target positions
-    G = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])  # Connectivity graph
-
-    logger = logging.getLogger("Auction")
-    logger.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
+    logger = logging.getLogger("AuctionTest")
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(name)s [%(levelname)s] %(message)s")
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
-    auction = HybridAuction(R_0, R_f, G=G, logger=logger)
-    new_targets = auction.assign()
-    print("New Assignments:", new_targets)
+    # Define layered configuration
+    layer_sizes = [6, 12, 24]
+    agent_types = [i + 1 for i, size in enumerate(layer_sizes) for _ in range(size)]
+    agent_ids = list(range(sum(layer_sizes)))
+    np.random.seed(0)
+    np.random.shuffle(agent_ids)
+
+    # Assign shuffled IDs to layers
+    layer_config = []
+    idx = 0
+    for size in layer_sizes:
+        layer_config.append(agent_ids[idx : idx + size])
+        idx += size
+
+    flat_config = [agent for layer in layer_config for agent in layer]
+    graph = SystemGraph(layer_config, flat_config)
+
+    # Create mock initial and target positions
+    initial_positions = np.random.rand(len(flat_config), 3) * 100
+    target_positions = np.random.rand(len(flat_config), 3) * 100
+
+    logger.info("Initial positions:\n%s", initial_positions)
+    logger.info("Original target positions:\n%s", target_positions)
+    # Run all auctions for demo
+    for name, AuctionClass in auction_map.items():
+        logger.info(f"Running {name} auction")
+        auction = AuctionClass(
+            initial_positions.copy(), target_positions.copy(), graph, logger=logger
+        )
+        new_targets = auction.assign()
+        logger.info(f"Modified target positions: {new_targets}")

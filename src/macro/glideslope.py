@@ -40,7 +40,7 @@ class GlideslopeSimulator:
         self.set_simulation_params(sim)
 
     def set_simulation_params(self, sim: SimulationParams):
-        self.dt = sim.timestep
+        self.timestep = sim.timestep
         self.num_jumps = sim.num_jumps
         self.num_frames = sim.num_frames
         self.auction_type = sim.auction_type
@@ -79,10 +79,14 @@ class GlideslopeSimulator:
             if self.auction_type:
                 if self.auction_type not in auction_map:
                     raise ValueError(f"Unknown auction type: {self.auction_type}")
+                if isinstance(self.target_positions, list):
+                    raise ValueError(
+                        "target_positions should be a numpy array, not a list."
+                    )
                 self.target_positions = auction_map[self.auction_type](
-                    R_0=np.array([a.position for a in self.agents]),
-                    R_f=self.target_positions,
-                    G=system_graph,
+                    initial_positions=np.array([a.position for a in self.agents]),
+                    target_positions=self.target_positions,
+                    graph=system_graph,
                 ).assign()
             else:
                 self.target_positions = np.array([a.position for a in self.agents])
@@ -91,7 +95,7 @@ class GlideslopeSimulator:
                 agent.update_direction()
 
             for i, agent in enumerate(self.agents):
-                deltav, _ = agent.step(jump, self.num_jumps, phi_r, phi_v)
+                deltav = agent.compute_delta_v(jump, self.num_jumps, phi_r, phi_v)
                 self.energy += np.linalg.norm(deltav)
                 self.deltavs = np.append(self.deltavs, deltav)
 
@@ -99,13 +103,13 @@ class GlideslopeSimulator:
                     r_t, v_t = compute_maneuver_points(
                         r_0=agent.position,
                         v_0=agent.velocity,
-                        times=[t0, t0 + self.timestep * step],
+                        times=(t0, t0 + self.timestep * step),
                         eccentricity=self.eccentricity,
                         orbital_radius=self.orbital_radius,
                         angular_velocity=self.angular_velocity,
                     )
                     idx = jump * self.steps_per_jump + step
-                    self.trajectory[agent.id][idx] = np.concatenate((r_t, v_t))
+                    self.trajectory[agent.agent_id, idx] = np.concatenate((r_t, v_t))
                 agent.position = r_t
                 agent.velocity = v_t
 
@@ -113,7 +117,13 @@ class GlideslopeSimulator:
 
         return (
             self.trajectory,
+            self.all_system_graphs,
             self.deltavs,
             self.energy,
-            self.all_system_graphs,
         )
+
+    def get_last_system_graph(self):
+        """Return the last system graph after all jumps."""
+        if self.all_system_graphs:
+            return self.all_system_graphs[-1]
+        return None

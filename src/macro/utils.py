@@ -43,7 +43,7 @@ def random_vector(scale=1.0):
     return scale * np.array([random_sign() * np.random.rand() for _ in range(3)])
 
 
-def init_pose(num_agents, radius, *, seed=None):
+def initialize_poses(num_agents: int, radius: float, *, seed=None):
     """
     Generate random initial positions and attitudes for spacecraft agents.
 
@@ -58,22 +58,73 @@ def init_pose(num_agents, radius, *, seed=None):
 
     Returns:
     -------
-    R_0 : list of np.ndarray
+    R_0 : np.ndarray
       Initial position vectors for each agent
-    Theta : list of np.ndarray
+    Theta : np.ndarray
       Initial attitude vectors (Euler angles in radians)
     """
     if seed is not None:
         np.random.seed(seed)
 
-    R_0 = [random_vector(radius) for _ in range(num_agents)]
-    Theta = [random_vector(np.pi) for _ in range(num_agents)]
-    Theta.append(np.zeros(3))
+    R_0 = np.array([random_vector(radius) for _ in range(num_agents)])
+    Theta = np.array([random_vector(np.pi) for _ in range(num_agents)])
+    Theta = np.append(Theta, np.zeros((1, 3)), axis=0)
+    # Ensure Theta has shape (num_agents, 1, 3)
+    if Theta.ndim == 2:
+        Theta = Theta[:, np.newaxis, :]
 
     return R_0, Theta
 
 
-def gen_cost(ego_location, target_locations, min_value=True, func="euclidean"):
+def check_intersection(ego_initial, ego_target, other_initial, other_target, tol=1e-3):
+    """
+    Check if the trajectory of the ego agent intersects with another agent's trajectory in 3D space.
+
+    Parameters
+    ----------
+    ego_initial : np.ndarray
+        Initial position of the ego agent.
+    ego_target : np.ndarray
+        Target position of the ego agent.
+    other_initial : np.ndarray
+        Initial position of the other agent.
+    other_target : np.ndarray
+        Target position of the other agent.
+    tol : float, optional
+        Tolerance for considering an intersection (default is 1e-3).
+
+    Returns
+    -------
+    bool
+        True if the line segments intersect (within `tol`), False otherwise.
+    """
+    dir_e = ego_target - ego_initial
+    dir_o = other_target - other_initial
+    sep = ego_initial - other_initial
+
+    dot_ee = np.dot(dir_e, dir_e)
+    dot_eo = np.dot(dir_e, dir_o)
+    dot_oo = np.dot(dir_o, dir_o)
+    dot_es = np.dot(dir_e, sep)
+    dot_os = np.dot(dir_o, sep)
+
+    denom = dot_ee * dot_oo - dot_eo * dot_eo
+    if abs(denom) < 1e-8:
+        return False  # Segments are nearly parallel
+
+    param_a = (dot_eo * dot_os - dot_oo * dot_es) / denom
+    param_b = (dot_ee * dot_os - dot_eo * dot_es) / denom
+
+    if not (0 <= param_a <= 1 and 0 <= param_b <= 1):
+        return False  # Closest points are outside the segments
+
+    closest_point_e = ego_initial + param_a * dir_e
+    closest_point_o = other_initial + param_b * dir_o
+
+    return np.linalg.norm(closest_point_e - closest_point_o) < tol
+
+
+def generate_cost(ego_location, target_locations, min_value=True, func="euclidean"):
     """
     Generate cost based on Euclidean distance between an agent and all target positions.
 

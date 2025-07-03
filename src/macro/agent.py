@@ -56,12 +56,12 @@ class Agent:
         self.glideslope_dir = delta / norm if norm > 1e-4 else np.zeros_like(delta)
 
     def compute_delta_v(
-        self, idx: int, total_steps: int, phi_r: np.ndarray, phi_v: np.ndarray
+        self, jump: int, num_jumps: int, phi_r: np.ndarray, phi_v: np.ndarray
     ) -> np.ndarray:
         if self.glideslope_dir is None or np.linalg.norm(self.glideslope_dir) < 1e-4:
             return np.zeros(3)
 
-        scale = 1.0 - (idx + 1) / total_steps
+        scale = 1.0 - (jump + 1) / num_jumps
         offset = (
             scale * np.linalg.norm(self.position - self.target) * self.glideslope_dir
         )

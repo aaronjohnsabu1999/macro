@@ -73,6 +73,17 @@ class SystemGraph:
     def get_neighbors(self, agent_id):
         return list(self.graph.neighbors(agent_id))
 
+    def get_all_neighbors(self):
+        """
+        Get a dictionary of all neighbors for each agent in the graph.
+        Returns:
+            dict: A dictionary where keys are agent IDs and values are lists of neighbor IDs.
+        """
+        return {
+            agent_id: list(self.graph.neighbors(agent_id))
+            for agent_id in self.graph.nodes()
+        }
+
     def get_layer_lengths(self):
         return self.layer_lengths
 
@@ -165,3 +176,54 @@ class SystemGraph:
 
         self._update_flat_config()
         self._build_graph()
+
+
+if __name__ == "__main__":
+    # Example layer configuration with agent IDs
+    layer_config = [
+        [1],  # Layer 0
+        [2, 3],  # Layer 1
+        [4, 5, 6, 7],  # Layer 2
+        [8, 9, 10, 11, 12, 13, 14, 15],  # Layer 3
+    ]
+
+    flat_config = [agent for layer in layer_config for agent in layer]
+
+    # Initialize SystemGraph
+    system_graph = SystemGraph(layer_config, flat_config)
+
+    # Print adjacency matrix
+    print("Adjacency Matrix:")
+    print(system_graph.get_adjacency_matrix())
+
+    # Print all neighbors
+    print("\nNeighbors per Agent:")
+    for agent_id, neighbors in system_graph.get_all_neighbors().items():
+        print(f"Agent {agent_id}: {neighbors}")
+
+    # Test layer rotation
+    print("\nRotating Layer 2 by 1...")
+    system_graph.rotate_layer(2, 1)
+    print("Layer Configuration After Rotation:")
+    for idx, layer in enumerate(system_graph.get_layer_config()):
+        print(f"Layer {idx}: {layer}")
+
+    # Test 3-agent exchange
+    print("\nExchanging (1,0), (2,0), and (1,1)...")
+    system_graph.exchange_positions((1, 0), (2, 0), (1, 1))
+    print("Layer Configuration After Exchange:")
+    for idx, layer in enumerate(system_graph.get_layer_config()):
+        print(f"Layer {idx}: {layer}")
+
+    # Check if graph is connected
+    print(
+        "\nGraph Connectivity:",
+        "Connected" if system_graph.is_connected() else "Disconnected",
+    )
+
+    # Test shortest path between two agents
+    agent_a, agent_b = 2, 11
+    distance = system_graph.get_config_distance(agent_a, agent_b)
+    print(
+        f"\nShortest path distance between Agent {agent_a} and Agent {agent_b}: {distance}"
+    )

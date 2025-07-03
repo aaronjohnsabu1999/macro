@@ -44,7 +44,11 @@ def calc_number_of_layers(num_agents):
 
 
 def generate_target_positions(
-    clear_aperture, orbital_radius, num_agents, layer_lengths, expansion
+    clear_aperture: float,
+    orbital_radius: float,
+    num_agents: int,
+    layer_lengths: list[int],
+    expansion: float,
 ):
     """
     Generate 3D target positions for agents arranged in concentric circular layers.
@@ -64,11 +68,11 @@ def generate_target_positions(
 
     Returns
     -------
-    list[list[float]]
-        A list of 3D positions (x, y, z) for each agent.
+    np.ndarray
+        3D positions of agents in the format [[x1, y1, z1], [x2, y2, z2], ...].
     """
 
-    R_f = []
+    R_f = np.zeros((num_agents, 3), dtype=float)
     num_layers = len(layer_lengths)
     _, layer_params = generate_paraboloid_layer_geometry(
         clear_aperture, orbital_radius, num_layers
@@ -85,7 +89,7 @@ def generate_target_positions(
         y = expansion * XY_radii[layer_idx] * np.cos(angle)
         z = expansion * Z_offsets[layer_idx]
 
-        R_f.append([x, y, z])
+        R_f[agent_id] = [x, y, z]
 
     return R_f
 
